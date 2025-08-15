@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import AutopilotControl from './AutopilotControl';
 import AIInsightsPanel from './AIInsightsPanel';
+import { useRedditUser } from '../hooks/useRedditUser';
 
 const MainContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const { redditUser } = useRedditUser();
 
   return (
     <div className="py-6">
@@ -69,16 +71,22 @@ const MainContent: React.FC = () => {
             {/* Performance Stats */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="text-center p-4 bg-reddit-bg rounded-lg">
-                <div className="text-2xl font-bold text-green-600">+127</div>
-                <div className="text-sm text-reddit-gray">Karma Gained</div>
+                <div className="text-2xl font-bold text-green-600">
+                  {redditUser.connected ? (redditUser.postKarma + redditUser.commentKarma).toLocaleString() : '0'}
+                </div>
+                <div className="text-sm text-reddit-gray">Total Karma</div>
               </div>
               <div className="text-center p-4 bg-reddit-bg rounded-lg">
-                <div className="text-2xl font-bold text-reddit-primary">8.4%</div>
-                <div className="text-sm text-reddit-gray">Success Rate</div>
+                <div className="text-2xl font-bold text-reddit-primary">
+                  {redditUser.connected ? `${redditUser.accountHealth}%` : 'N/A'}
+                </div>
+                <div className="text-sm text-reddit-gray">Account Health</div>
               </div>
               <div className="text-center p-4 bg-reddit-bg rounded-lg">
-                <div className="text-2xl font-bold text-blue-600">142</div>
-                <div className="text-sm text-reddit-gray">Engagements</div>
+                <div className="text-2xl font-bold text-blue-600">
+                  {redditUser.connected ? redditUser.postKarma.toLocaleString() : '0'}
+                </div>
+                <div className="text-sm text-reddit-gray">Post Karma</div>
               </div>
             </div>
           </div>

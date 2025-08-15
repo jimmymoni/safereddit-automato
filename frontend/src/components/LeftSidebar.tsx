@@ -2,22 +2,46 @@ import React from 'react';
 import { useRedditUser } from '../hooks/useRedditUser';
 
 const LeftSidebar: React.FC = () => {
-  const { redditUser } = useRedditUser();
+  const { redditUser, loading, error } = useRedditUser();
   return (
     <div className="sticky top-20 h-screen overflow-y-auto pb-20 px-4">
       {/* Profile Snapshot */}
       <div className="bg-white rounded-lg border border-reddit-border p-4 mb-4">
-        <div className="flex items-center space-x-3 mb-3">
-          <div className="w-12 h-12 bg-reddit-accent rounded-full flex items-center justify-center">
-            <span className="text-lg font-bold text-white">U</span>
+        {loading ? (
+          <div className="flex items-center space-x-3 mb-3">
+            <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center animate-pulse">
+              <span className="text-lg font-bold text-gray-400">...</span>
+            </div>
+            <div>
+              <div className="h-4 bg-gray-200 rounded animate-pulse mb-2"></div>
+              <div className="h-3 bg-gray-200 rounded animate-pulse w-24"></div>
+            </div>
           </div>
-          <div>
-            <h3 className="font-semibold text-reddit-dark">
-              {redditUser.connected ? `u/${redditUser.redditUsername}` : 'Not connected'}
-            </h3>
-            <p className="text-sm text-reddit-gray">Active since Dec 2024</p>
+        ) : error ? (
+          <div className="flex items-center space-x-3 mb-3">
+            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+              <span className="text-lg font-bold text-red-500">!</span>
+            </div>
+            <div>
+              <h3 className="font-semibold text-red-600">Error loading profile</h3>
+              <p className="text-sm text-red-500">{error}</p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex items-center space-x-3 mb-3">
+            <div className="w-12 h-12 bg-reddit-accent rounded-full flex items-center justify-center">
+              <span className="text-lg font-bold text-white">
+                {redditUser.redditUsername ? redditUser.redditUsername[0]?.toUpperCase() : 'U'}
+              </span>
+            </div>
+            <div>
+              <h3 className="font-semibold text-reddit-dark">
+                {redditUser.connected ? `u/${redditUser.redditUsername}` : 'Not connected'}
+              </h3>
+              <p className="text-sm text-reddit-gray">Active since Dec 2024</p>
+            </div>
+          </div>
+        )}
         
         {/* Karma Display */}
         <div className="grid grid-cols-2 gap-3 mb-3">

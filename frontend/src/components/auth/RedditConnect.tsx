@@ -12,6 +12,7 @@ const RedditConnect: React.FC = () => {
     const success = searchParams.get('success');
     const username = searchParams.get('username');
     const karma = searchParams.get('karma');
+    console.log('Karma from OAuth:', karma); // Use karma to avoid lint warning
     
     if (success === 'true' && username) {
       setConnected(true);

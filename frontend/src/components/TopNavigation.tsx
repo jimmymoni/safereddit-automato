@@ -86,7 +86,11 @@ const TopNavigation: React.FC<TopNavigationProps> = ({ onMobileMenuToggle }) => 
                 className="flex items-center space-x-2 p-1 rounded-full hover:bg-reddit-bg transition-colors"
               >
                 <div className="w-8 h-8 bg-reddit-accent rounded-full flex items-center justify-center">
-                  <span className="text-sm font-medium text-white">U</span>
+                  <span className="text-sm font-medium text-white">
+                    {redditUser.connected && redditUser.redditUsername 
+                      ? redditUser.redditUsername[0]?.toUpperCase() 
+                      : 'U'}
+                  </span>
                 </div>
                 <div className="hidden sm:block text-left">
                   <p className="text-sm font-medium text-reddit-dark">
