@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL!
-const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY!
+let supabaseUrl = process.env.REACT_APP_SUPABASE_URL
+let supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY
 
 // Debug logging (disabled for performance)
 // console.log('Supabase Config:', {
@@ -10,7 +10,10 @@ const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY!
 // })
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables')
+  console.warn('Missing Supabase environment variables - using fallback values')
+  // Use fallback values to prevent app crash
+  supabaseUrl = 'https://placeholder.supabase.co'
+  supabaseAnonKey = 'placeholder_key'
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
