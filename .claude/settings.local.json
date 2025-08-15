@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "ls",
+      "mkdir",
+      "npm",
+      "yarn",
+      "node",
+      "git"
+    ],
+    "deny": [
+      "rm",
+      "bash *"
+    ],
+    "defaultMode": "acceptEdits"
+  }
+}

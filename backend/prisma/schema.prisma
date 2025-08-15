@@ -1,0 +1,144 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                Int                @id @default(autoincrement())
+  email             String             @unique
+  redditUsername    String?            @unique
+  redditToken       String?
+  redditRefreshToken String?
+  redditTokenExpiry DateTime?
+  settings          Json?
+  autopilotSettings Json?
+  accountHealth     Float              @default(100.0)
+  postKarma         Int                @default(0)
+  commentKarma      Int                @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  
+  // Relations
+  activityLogs      ActivityLog[]
+  contentItems      ContentItem[]
+  scheduledPosts    ScheduledPost[]
+  autopilotSessions AutopilotSession[]
+  redditInsights    RedditInsight[]
+}
+
+model ActivityLog {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  action      String
+  target      String?  // subreddit, post ID, etc.
+  result      String?  // success, failed, pending
+  metadata    Json?    // additional data about the action
+  karmaChange Int      @default(0)
+  timestamp   DateTime @default(now())
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ContentItem {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  title       String
+  content     String
+  contentType String   // post, comment, image, link
+  tags        String   // JSON array of tags  
+  subreddits  String   // JSON array of target subreddits
+  status      String   @default("draft") // draft, ready, published, archived
+  performance Json?    // engagement metrics
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ScheduledPost {
+  id           Int       @id @default(autoincrement())
+  userId       Int
+  contentItemId Int?
+  subreddit    String
+  title        String
+  content      String
+  postType     String    // text, link, image
+  scheduledFor DateTime
+  status       String    @default("scheduled") // scheduled, posted, failed, cancelled
+  redditPostId String?   // Reddit post ID after posting
+  result       Json?     // posting result and metrics
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AutopilotSession {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  mode        String    // conservative, balanced, aggressive, custom
+  settings    Json      // autopilot configuration
+  isActive    Boolean   @default(false)
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+  performance Json?     // session performance metrics
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RedditInsight {
+  id          Int      @id @default(autoincrement())
+  userId      Int?     // null for global insights
+  type        String   // opportunity, timing, safety, learning
+  title       String
+  description String
+  metadata    Json     // detailed insight data
+  confidence  Float    // 0-100 confidence score
+  priority    String   // high, medium, low
+  isActive    Boolean  @default(true)
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+  
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SubredditAnalysis {
+  id                Int      @id @default(autoincrement())
+  subreddit         String   @unique
+  memberCount       Int?
+  activeUsers       Int?
+  postingFrequency  Float?   // average posts per hour
+  engagementRate    Float?   // average upvotes/comments per post
+  bestPostingTimes  Json?    // optimal posting windows
+  contentPreferences Json?   // preferred content types and themes
+  rules             Json?    // subreddit rules and guidelines
+  moderatorActivity Json?    // moderator behavior patterns
+  riskLevel         Float    @default(1.0) // 1-5 risk score
+  lastAnalyzed      DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model TrendingTopic {
+  id              Int      @id @default(autoincrement())
+  title           String
+  subreddit       String
+  score           Int
+  commentCount    Int
+  engagementScore Float    // calculated engagement metric
+  keywords        String   // JSON array of trending keywords
+  sentiment       String?  // positive, negative, neutral
+  opportunity     String?  // high, medium, low
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+}
