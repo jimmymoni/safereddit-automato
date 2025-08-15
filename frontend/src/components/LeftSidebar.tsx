@@ -1,6 +1,8 @@
 import React from 'react';
+import { useRedditUser } from '../hooks/useRedditUser';
 
 const LeftSidebar: React.FC = () => {
+  const { redditUser } = useRedditUser();
   return (
     <div className="sticky top-20 h-screen overflow-y-auto pb-20 px-4">
       {/* Profile Snapshot */}
@@ -10,7 +12,9 @@ const LeftSidebar: React.FC = () => {
             <span className="text-lg font-bold text-white">U</span>
           </div>
           <div>
-            <h3 className="font-semibold text-reddit-dark">u/automator</h3>
+            <h3 className="font-semibold text-reddit-dark">
+              {redditUser.connected ? `u/${redditUser.redditUsername}` : 'Not connected'}
+            </h3>
             <p className="text-sm text-reddit-gray">Active since Dec 2024</p>
           </div>
         </div>
@@ -18,11 +22,15 @@ const LeftSidebar: React.FC = () => {
         {/* Karma Display */}
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div className="text-center">
-            <div className="text-lg font-bold text-reddit-upvote">1,247</div>
+            <div className="text-lg font-bold text-reddit-upvote">
+              {redditUser.postKarma.toLocaleString()}
+            </div>
             <div className="text-xs text-reddit-gray">Post Karma</div>
           </div>
           <div className="text-center">
-            <div className="text-lg font-bold text-reddit-downvote">892</div>
+            <div className="text-lg font-bold text-reddit-downvote">
+              {redditUser.commentKarma.toLocaleString()}
+            </div>
             <div className="text-xs text-reddit-gray">Comment Karma</div>
           </div>
         </div>
@@ -34,7 +42,10 @@ const LeftSidebar: React.FC = () => {
             <span className="text-sm font-medium text-green-600">Healthy</span>
           </div>
           <div className="w-full bg-reddit-bg rounded-full h-2">
-            <div className="bg-green-500 h-2 rounded-full" style={{ width: '78%' }}></div>
+            <div 
+              className="bg-green-500 h-2 rounded-full" 
+              style={{ width: `${redditUser.accountHealth}%` }}
+            ></div>
           </div>
           <p className="text-xs text-reddit-gray mt-1">Ready for active posting</p>
         </div>

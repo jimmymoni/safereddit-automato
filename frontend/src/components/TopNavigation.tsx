@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useRedditUser } from '../hooks/useRedditUser';
 
 interface TopNavigationProps {
   onMobileMenuToggle?: () => void;
@@ -7,6 +8,7 @@ interface TopNavigationProps {
 const TopNavigation: React.FC<TopNavigationProps> = ({ onMobileMenuToggle }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const { redditUser } = useRedditUser();
 
   return (
     <nav className="bg-white border-b border-reddit-border sticky top-0 z-50">
@@ -87,8 +89,12 @@ const TopNavigation: React.FC<TopNavigationProps> = ({ onMobileMenuToggle }) => 
                   <span className="text-sm font-medium text-white">U</span>
                 </div>
                 <div className="hidden sm:block text-left">
-                  <p className="text-sm font-medium text-reddit-dark">u/automator</p>
-                  <p className="text-xs text-reddit-gray">1,247 karma</p>
+                  <p className="text-sm font-medium text-reddit-dark">
+                    {redditUser.connected ? `u/${redditUser.redditUsername}` : 'Not connected'}
+                  </p>
+                  <p className="text-xs text-reddit-gray">
+                    {(redditUser.postKarma + redditUser.commentKarma).toLocaleString()} karma
+                  </p>
                 </div>
                 <svg className="h-4 w-4 text-reddit-gray" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
