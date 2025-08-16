@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import AutopilotControl from './AutopilotControl';
+import RedditScholarSimple from './RedditScholarSimple';
 import AIInsightsPanel from './AIInsightsPanel';
 import { useRedditUser } from '../hooks/useRedditUser';
 
@@ -299,8 +300,7 @@ const MainContent: React.FC = () => {
       {/* Reddit Scholar Autopilot Tab */}
       {activeTab === 'autopilot' && (
         <div className="space-y-6">
-          <AutopilotControl />
-          <AIInsightsPanel />
+          <RedditScholarSimple />
         </div>
       )}
 

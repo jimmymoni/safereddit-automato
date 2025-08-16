@@ -15,6 +15,7 @@ const aiRoutes = require('./routes/ai');
 const autopilotRoutes = require('./routes/autopilot');
 const redditRoutes = require('./routes/reddit');
 const insightsRoutes = require('./routes/insights');
+const scholarRoutes = require('./routes/scholar');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -69,7 +70,8 @@ app.get('/api', (req, res) => {
       ai: '/api/ai/*',
       autopilot: '/api/autopilot/*',
       reddit: '/api/reddit/*',
-      insights: '/api/insights/*'
+      insights: '/api/insights/*',
+      scholar: '/api/scholar/*'
     }
   });
 });
@@ -81,6 +83,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/autopilot', autopilotRoutes);
 app.use('/api/reddit', redditRoutes);
 app.use('/api/insights', insightsRoutes);
+app.use('/api/scholar', scholarRoutes);
 
 // User dashboard endpoint with safety middleware (real data with fallback)
 app.get('/api/user/dashboard', safetyMiddleware('dashboard_fetch'), async (req, res) => {
