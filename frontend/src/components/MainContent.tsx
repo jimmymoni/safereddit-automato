@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import AutopilotControl from './AutopilotControl';
 import AIInsightsPanel from './AIInsightsPanel';
 import { useRedditUser } from '../hooks/useRedditUser';
@@ -6,6 +6,86 @@ import { useRedditUser } from '../hooks/useRedditUser';
 const MainContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const { redditUser } = useRedditUser();
+  
+  // Trend Finder state
+  const [trendingPosts, setTrendingPosts] = useState<any[]>([]);
+  const [subscriptions, setSubscriptions] = useState<any[]>([]);
+  const [isLoadingTrends, setIsLoadingTrends] = useState(false);
+  const [trendsError, setTrendsError] = useState<string | null>(null);
+
+  // Fetch trending posts from user's subscribed subreddits
+  const fetchTrendingPosts = useCallback(async () => {
+    if (!redditUser.connected) return;
+    
+    setIsLoadingTrends(true);
+    setTrendsError(null);
+    
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/reddit/trending/subscribed?limit=25', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setTrendingPosts(result.data.posts);
+      } else {
+        setTrendsError(result.error || 'Failed to fetch trending posts');
+      }
+    } catch (error) {
+      console.error('Error fetching trending posts:', error);
+      setTrendsError('Failed to connect to server');
+    } finally {
+      setIsLoadingTrends(false);
+    }
+  }, [redditUser.connected]);
+
+  // Fetch user's subscribed subreddits
+  const fetchSubscriptions = useCallback(async () => {
+    if (!redditUser.connected) return;
+    
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/reddit/subscriptions', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setSubscriptions(result.data.subreddits);
+      }
+    } catch (error) {
+      console.error('Error fetching subscriptions:', error);
+    }
+  }, [redditUser.connected]);
+
+  // Load data when component mounts or when Reddit connection changes
+  useEffect(() => {
+    if (redditUser.connected && activeTab === 'trends') {
+      fetchTrendingPosts();
+      fetchSubscriptions();
+    }
+  }, [redditUser.connected, activeTab, fetchTrendingPosts, fetchSubscriptions]);
+
+  // Helper function to format time ago
+  const formatTimeAgo = (timestamp: number): string => {
+    const now = Date.now() / 1000;
+    const diff = now - timestamp;
+    const hours = Math.floor(diff / 3600);
+    const days = Math.floor(diff / 86400);
+    
+    if (days > 0) return `${days} days ago`;
+    if (hours > 0) return `${hours} hours ago`;
+    return 'Just now';
+  };
 
   return (
     <div className="py-6">
@@ -127,83 +207,147 @@ const MainContent: React.FC = () => {
       {/* Trend Finder Tab */}
       {activeTab === 'trends' && (
         <div className="space-y-4">
-          {/* Trend Filters */}
+          {/* Header with refresh button */}
           <div className="bg-white rounded-lg border border-reddit-border p-4">
-            <div className="flex flex-wrap gap-3">
-              <select className="border border-reddit-border rounded px-3 py-1 text-sm">
-                <option>All Subreddits</option>
-                <option>r/entrepreneur</option>
-                <option>r/productivity</option>
-                <option>r/startups</option>
-              </select>
-              <select className="border border-reddit-border rounded px-3 py-1 text-sm">
-                <option>Last 24 hours</option>
-                <option>Last week</option>
-                <option>Last month</option>
-              </select>
-              <select className="border border-reddit-border rounded px-3 py-1 text-sm">
-                <option>High engagement</option>
-                <option>Rising posts</option>
-                <option>New posts</option>
-              </select>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-reddit-dark">Trending in Your Subreddits</h2>
+              <button 
+                onClick={fetchTrendingPosts}
+                disabled={isLoadingTrends}
+                className="bg-reddit-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-reddit-primary/90 disabled:opacity-50 transition-colors"
+              >
+                {isLoadingTrends ? 'Loading...' : 'Refresh'}
+              </button>
             </div>
+            
+            {/* Subscriptions summary */}
+            {subscriptions.length > 0 && (
+              <div className="text-sm text-reddit-gray">
+                Showing trending posts from {subscriptions.length} subscribed subreddits
+              </div>
+            )}
           </div>
 
-          {/* Trending Posts Feed */}
-          <div className="space-y-4">
-            {[1, 2, 3, 4, 5].map(post => (
-              <div key={post} className="bg-white rounded-lg border border-reddit-border p-4 hover:border-reddit-primary transition-colors">
-                <div className="flex items-start space-x-3">
-                  <div className="flex flex-col items-center space-y-1">
-                    <button className="text-reddit-gray hover:text-reddit-upvote">
-                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                    <span className="text-xs font-bold">{Math.floor(Math.random() * 1000) + 100}</span>
-                    <button className="text-reddit-gray hover:text-reddit-downvote">
-                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                  </div>
-                  
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2 text-sm text-reddit-gray mb-2">
-                      <span className="font-medium">r/entrepreneur</span>
-                      <span>•</span>
-                      <span>Posted by u/startup_guy</span>
-                      <span>•</span>
-                      <span>{Math.floor(Math.random() * 12) + 1} hours ago</span>
-                      <div className="ml-auto flex items-center space-x-1">
-                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                        <span className="text-xs font-medium text-green-600">High Potential</span>
-                      </div>
-                    </div>
-                    
-                    <h3 className="font-medium text-reddit-dark mb-2 hover:text-reddit-primary cursor-pointer">
-                      How I grew my SaaS to $10k MRR in 6 months without paid ads
-                    </h3>
-                    
-                    <p className="text-sm text-reddit-gray mb-3">
-                      Here's my complete journey from idea to $10k MRR. I'll share the exact strategies, tools, and mistakes I made along the way...
-                    </p>
-                    
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-4 text-sm text-reddit-gray">
-                        <span>💬 {Math.floor(Math.random() * 50) + 10} comments</span>
-                        <span>📈 Engagement Score: {Math.floor(Math.random() * 40) + 60}%</span>
-                      </div>
-                      
-                      <button className="bg-reddit-primary text-white px-4 py-2 rounded-full text-sm font-medium hover:bg-reddit-primary/90 transition-colors">
-                        Join Conversation
-                      </button>
-                    </div>
-                  </div>
+          {/* Reddit connection check */}
+          {!redditUser.connected && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="flex items-center space-x-3">
+                <span className="text-yellow-600 text-xl">⚠️</span>
+                <div>
+                  <h3 className="font-medium text-yellow-800">Reddit Not Connected</h3>
+                  <p className="text-sm text-yellow-700">Please connect your Reddit account to see trending posts from your subscribed subreddits.</p>
                 </div>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
+
+          {/* Error state */}
+          {trendsError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-center space-x-3">
+                <span className="text-red-600 text-xl">❌</span>
+                <div>
+                  <h3 className="font-medium text-red-800">Error Loading Trends</h3>
+                  <p className="text-sm text-red-700">{trendsError}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Loading state */}
+          {isLoadingTrends && (
+            <div className="bg-white rounded-lg border border-reddit-border p-8">
+              <div className="flex items-center justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-reddit-primary"></div>
+                <span className="ml-3 text-reddit-gray">Loading trending posts...</span>
+              </div>
+            </div>
+          )}
+
+          {/* Trending Posts Feed */}
+          {redditUser.connected && !isLoadingTrends && !trendsError && (
+            <div className="space-y-4">
+              {trendingPosts.length === 0 ? (
+                <div className="bg-white rounded-lg border border-reddit-border p-8 text-center">
+                  <span className="text-4xl mb-4 block">📭</span>
+                  <h3 className="font-medium text-reddit-dark mb-2">No Trending Posts Found</h3>
+                  <p className="text-sm text-reddit-gray">Try subscribing to more subreddits or check back later.</p>
+                </div>
+              ) : (
+                trendingPosts.map(post => (
+                  <div key={post.id} className="bg-white rounded-lg border border-reddit-border p-4 hover:border-reddit-primary transition-colors">
+                    <div className="flex items-start space-x-3">
+                      <div className="flex flex-col items-center space-y-1">
+                        <button className="text-reddit-gray hover:text-reddit-upvote">
+                          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
+                          </svg>
+                        </button>
+                        <span className="text-xs font-bold">{post.score}</span>
+                        <button className="text-reddit-gray hover:text-reddit-downvote">
+                          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                          </svg>
+                        </button>
+                      </div>
+                      
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 text-sm text-reddit-gray mb-2">
+                          <span className="font-medium">r/{post.subreddit}</span>
+                          <span>•</span>
+                          <span>Posted by u/{post.author}</span>
+                          <span>•</span>
+                          <span>{formatTimeAgo(post.created)}</span>
+                          <div className="ml-auto flex items-center space-x-1">
+                            <div className={`w-2 h-2 rounded-full ${
+                              post.analysis.trending > 50 ? 'bg-green-500' : 
+                              post.analysis.trending > 25 ? 'bg-yellow-500' : 'bg-gray-400'
+                            }`}></div>
+                            <span className={`text-xs font-medium ${
+                              post.analysis.trending > 50 ? 'text-green-600' : 
+                              post.analysis.trending > 25 ? 'text-yellow-600' : 'text-gray-600'
+                            }`}>
+                              {post.analysis.trending > 50 ? 'High Potential' : 
+                               post.analysis.trending > 25 ? 'Medium Potential' : 'Low Potential'}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <h3 className="font-medium text-reddit-dark mb-2 hover:text-reddit-primary cursor-pointer">
+                          <a href={post.permalink} target="_blank" rel="noopener noreferrer">
+                            {post.title}
+                          </a>
+                        </h3>
+                        
+                        {post.flair && (
+                          <div className="mb-2">
+                            <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
+                              {post.flair}
+                            </span>
+                          </div>
+                        )}
+                        
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-4 text-sm text-reddit-gray">
+                            <span>💬 {post.numComments} comments</span>
+                            <span>📈 Trending Score: {post.analysis.trending}</span>
+                            <span>⬆️ {Math.round(post.upvoteRatio * 100)}% upvoted</span>
+                          </div>
+                          
+                          <button 
+                            onClick={() => window.open(post.permalink, '_blank')}
+                            className="bg-reddit-primary text-white px-4 py-2 rounded-full text-sm font-medium hover:bg-reddit-primary/90 transition-colors"
+                          >
+                            Join Conversation
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       )}
 

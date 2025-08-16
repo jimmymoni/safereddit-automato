@@ -423,6 +423,43 @@ class RedditAPIService {
   }
 
   /**
+   * Get user's subscribed subreddits
+   */
+  async getUserSubscriptions(userId) {
+    try {
+      const reddit = await this.redditAuth.getRedditInstance(userId);
+      
+      // Get user's subscribed subreddits
+      const subscriptions = await reddit.getSubscriptions({ limit: 100 });
+      
+      const subreddits = subscriptions.map(sub => ({
+        name: sub.display_name,
+        title: sub.title,
+        description: sub.description,
+        subscribers: sub.subscribers,
+        isNsfw: sub.over18,
+        url: sub.url,
+        created: sub.created_utc,
+        primaryColor: sub.primary_color,
+        iconUrl: sub.icon_img
+      }));
+
+      // Sort by subscriber count (most popular first)
+      subreddits.sort((a, b) => b.subscribers - a.subscribers);
+
+      return {
+        subreddits,
+        count: subreddits.length,
+        totalSubscribers: subreddits.reduce((sum, sub) => sum + sub.subscribers, 0)
+      };
+
+    } catch (error) {
+      console.error('Error getting user subscriptions:', error);
+      throw new Error(`Failed to get user subscriptions: ${error.message}`);
+    }
+  }
+
+  /**
    * Search Reddit for specific content
    */
   async searchReddit(userId, query, options = {}) {

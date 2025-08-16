@@ -272,6 +272,78 @@ router.get('/profile', verifyToken, async (req, res) => {
 });
 
 /**
+ * GET /api/reddit/subscriptions
+ * Get user's subscribed subreddits
+ */
+router.get('/subscriptions', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const result = await redditAPI.getUserSubscriptions(userId);
+    
+    res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (error) {
+    console.error('Error getting user subscriptions:', error);
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/reddit/trending/subscribed
+ * Get trending posts from user's subscribed subreddits
+ */
+router.get('/trending/subscribed', verifyToken, async (req, res) => {
+  try {
+    const { limit, timeframe } = req.query;
+    const userId = req.user.userId;
+
+    // First get user's subscriptions
+    const subscriptions = await redditAPI.getUserSubscriptions(userId);
+    const subredditNames = subscriptions.subreddits.map(sub => sub.name);
+
+    if (subredditNames.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          posts: [],
+          count: 0,
+          subreddits: [],
+          message: 'No subscribed subreddits found'
+        }
+      });
+    }
+
+    // Get trending posts from subscribed subreddits
+    const postLimit = parseInt(limit) || 25;
+    const result = await redditAPI.getTrendingPosts(userId, subredditNames, postLimit);
+    
+    res.json({
+      success: true,
+      data: {
+        posts: result,
+        count: result.length,
+        subreddits: subredditNames,
+        subscriptionsCount: subscriptions.count
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting trending posts from subscriptions:', error);
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
  * GET /api/reddit/search
  * Search Reddit for specific content
  */
