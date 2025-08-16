@@ -22,7 +22,7 @@ const MainContent: React.FC = () => {
     
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/reddit/trending/subscribed?limit=25', {
+      const response = await fetch('http://localhost:8000/api/reddit/trending/subscribed?limit=25', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -50,7 +50,7 @@ const MainContent: React.FC = () => {
     
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/reddit/subscriptions', {
+      const response = await fetch('http://localhost:8000/api/reddit/subscriptions', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
