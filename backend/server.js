@@ -263,35 +263,8 @@ function calculatePersonaHealth(user, todayLogs) {
   return Math.min(health, 100);
 }
 
-// Content management endpoints
-app.get('/api/content/vault', (req, res) => {
-  // Mock content vault data
-  const mockContent = [
-    {
-      id: 1,
-      title: '5 productivity hacks that changed my life',
-      content: 'These simple strategies helped me double my output and reduce stress levels significantly...',
-      tags: ['productivity', 'life-hacks'],
-      status: 'ready',
-      createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-      type: 'post'
-    },
-    {
-      id: 2,
-      title: 'Best tools for entrepreneurs',
-      content: 'After trying dozens of tools, here are the ones that actually matter...',
-      tags: ['entrepreneurship', 'tools'],
-      status: 'ready',
-      createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-      type: 'post'
-    }
-  ];
-
-  res.json({
-    success: true,
-    data: mockContent
-  });
-});
+// Note: Content vault endpoint is properly implemented in /routes/content.js
+// The real endpoint is at /api/content/vault with proper authentication
 
 // Trending content endpoint
 app.get('/api/content/trending', (req, res) => {
