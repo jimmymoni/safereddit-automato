@@ -45,8 +45,53 @@ const authenticateUser = async (req, res, next) => {
 };
 
 /**
+ * @route POST /api/ai/generate/test
+ * @desc Test generate Reddit post content (no auth required for testing)
+ * @access Public
+ */
+router.post('/generate/test', aiRateLimit, async (req, res) => {
+  try {
+    const { prompt, subreddit, contentType, tone, maxTokens, model } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+        message: 'Prompt is required'
+      });
+    }
+
+    const result = await aiService.generatePost(prompt, {
+      subreddit,
+      contentType,
+      tone,
+      maxTokens,
+      model
+    });
+
+    res.json({
+      success: true,
+      data: {
+        content: result.content,
+        model: result.model,
+        tokensUsed: result.tokensUsed
+      },
+      message: 'Test content generated successfully'
+    });
+
+  } catch (error) {
+    console.error('Test AI generation error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Content generation failed',
+      message: error.message
+    });
+  }
+});
+
+/**
  * @route POST /api/ai/generate/post
- * @desc Generate Reddit post content using Kimi AI
+ * @desc Generate Reddit post content using OpenAI
  * @access Private
  */
 router.post('/generate/post', aiRateLimit, authenticateUser, safetyMiddleware('ai_post_generation'), async (req, res) => {

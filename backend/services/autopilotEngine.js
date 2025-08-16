@@ -1,5 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const RedditAuthService = require('./redditAuth');
+const KimiAIService = require('./kimiAI');
 const { getRandomDelay } = require('../middleware/safetyMiddleware');
 
 const prisma = new PrismaClient();
@@ -7,6 +8,7 @@ const prisma = new PrismaClient();
 class AutopilotEngine {
   constructor() {
     this.redditAuth = new RedditAuthService();
+    this.aiService = new KimiAIService();
     this.isRunning = false;
     this.activeUsers = new Map(); // userId -> autopilot session
     this.actionQueue = new Map(); // userId -> action queue
@@ -26,7 +28,6 @@ class AutopilotEngine {
       const user = await prisma.user.findUnique({
         where: { id: userId },
         include: { 
-          autopilotSettings: true,
           activityLogs: {
             where: {
               timestamp: {
@@ -56,13 +57,13 @@ class AutopilotEngine {
       const autopilotSession = await prisma.autopilotSession.create({
         data: {
           userId,
-          status: 'active',
+          mode: settings.riskLevel || 'balanced',
           settings: {
-            ...user.autopilotSettings?.settings,
+            ...user.autopilotSettings,
             ...settings,
             startedAt: new Date()
           },
-          lastActivity: new Date()
+          isActive: true
         }
       });
 
@@ -77,6 +78,9 @@ class AutopilotEngine {
         lastAction: new Date(),
         healthScore: healthCheck.healthScore
       });
+
+      // Generate initial content actions
+      await this.populateActionQueue(userId);
 
       // Start the autopilot loop
       this.startAutopilotLoop(userId);
@@ -140,9 +144,8 @@ class AutopilotEngine {
       await prisma.autopilotSession.update({
         where: { id: session.sessionId },
         data: {
-          status: 'stopped',
-          endedAt: new Date(),
-          lastActivity: new Date()
+          isActive: false,
+          endedAt: new Date()
         }
       });
 
@@ -181,7 +184,7 @@ class AutopilotEngine {
       // Get latest session
       const latestSession = await prisma.autopilotSession.findFirst({
         where: { userId },
-        orderBy: { createdAt: 'desc' }
+        orderBy: { startedAt: 'desc' }
       });
 
       // Get recent activity
@@ -290,16 +293,11 @@ class AutopilotEngine {
    */
   async updateSettings(userId, newSettings) {
     try {
-      // Update settings in database
-      await prisma.autopilotSettings.upsert({
-        where: { userId },
-        update: {
-          settings: newSettings,
-          updatedAt: new Date()
-        },
-        create: {
-          userId,
-          settings: newSettings
+      // Update settings in user profile
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          autopilotSettings: newSettings
         }
       });
 
@@ -313,8 +311,7 @@ class AutopilotEngine {
         await prisma.autopilotSession.update({
           where: { id: session.sessionId },
           data: {
-            settings: session.settings,
-            lastActivity: new Date()
+            settings: session.settings
           }
         });
       }
@@ -359,6 +356,10 @@ class AutopilotEngine {
     }
 
     const session = this.activeUsers.get(userId);
+    
+    // First, populate queue with AI-generated content if needed
+    await this.populateActionQueue(userId);
+    
     const queue = this.actionQueue.get(userId) || [];
 
     // Check if we should process actions (respect delays)
@@ -396,10 +397,15 @@ class AutopilotEngine {
       session.lastAction = new Date();
       this.activeUsers.set(userId, session);
 
-      // Update session in database
+      // Update session in database  
       await prisma.autopilotSession.update({
         where: { id: session.sessionId },
-        data: { lastActivity: new Date() }
+        data: { 
+          settings: {
+            ...session.settings,
+            lastActivity: new Date()
+          }
+        }
       });
 
     } catch (error) {
@@ -563,6 +569,114 @@ class AutopilotEngine {
       });
     }
     return sessions;
+  }
+
+  /**
+   * Generate content-based actions using AI
+   */
+  async generateContentActions(userId, session) {
+    try {
+      const { settings } = session;
+      const contentStrategy = settings.contentStrategy;
+      
+      if (!contentStrategy || !contentStrategy.userPrompt) {
+        console.log(`No content strategy found for user ${userId}`);
+        return [];
+      }
+
+      const actions = [];
+      const targetSubreddits = contentStrategy.targetSubreddits || settings.targetSubreddits || ['productivity'];
+      
+      // Generate posts based on strategy
+      if (settings.autoPost && settings.maxPostsPerDay > 0) {
+        for (let i = 0; i < Math.min(2, settings.maxPostsPerDay); i++) {
+          const subreddit = targetSubreddits[Math.floor(Math.random() * targetSubreddits.length)];
+          
+          try {
+            // Create AI prompt based on user's content strategy
+            const prompt = `${contentStrategy.userPrompt}\n\nTarget audience: ${contentStrategy.targetNiches?.join(', ') || 'general'}\nSubreddit: r/${subreddit}\nContent type: ${contentStrategy.postTypes?.[0] || 'discussion'}\nTone: ${contentStrategy.contentTone || 'engaging'}\n\nCreate a valuable, authentic post that would resonate with this community.`;
+            
+            const aiResult = await this.aiService.generatePost(prompt, {
+              subreddit: subreddit,
+              contentType: contentStrategy.postTypes?.[0] || 'text',
+              tone: contentStrategy.contentTone || 'engaging',
+              maxTokens: 400
+            });
+
+            if (aiResult && aiResult.content) {
+              // Extract title and content from AI response
+              const content = aiResult.content;
+              const lines = content.split('\n').filter(line => line.trim());
+              const title = lines[0]?.replace(/^(Title:|Post:|#)\s*/i, '').trim() || 'Interesting Discussion';
+              const text = lines.slice(1).join('\n').trim() || content;
+
+              actions.push({
+                type: 'post',
+                data: {
+                  subreddit: subreddit,
+                  title: title.substring(0, 300), // Reddit title limit
+                  text: text.substring(0, 10000), // Reddit text limit
+                  contentStrategy: {
+                    generatedBy: 'ai',
+                    prompt: contentStrategy.userPrompt,
+                    tone: contentStrategy.contentTone
+                  }
+                },
+                priority: 'normal',
+                scheduledFor: new Date(Date.now() + (i + 1) * settings.postFrequency * 60 * 1000)
+              });
+            }
+          } catch (error) {
+            console.error(`Error generating AI content for user ${userId}:`, error);
+          }
+        }
+      }
+
+      // Log AI content generation
+      await prisma.activityLog.create({
+        data: {
+          userId,
+          action: 'ai_content_generated',
+          result: 'success',
+          metadata: {
+            actionsGenerated: actions.length,
+            strategy: contentStrategy.userPrompt.substring(0, 100)
+          }
+        }
+      });
+
+      return actions;
+    } catch (error) {
+      console.error(`Error generating content actions for user ${userId}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Populate action queue with AI-generated content
+   */
+  async populateActionQueue(userId) {
+    try {
+      if (!this.activeUsers.has(userId)) {
+        return;
+      }
+
+      const session = this.activeUsers.get(userId);
+      const currentQueue = this.actionQueue.get(userId) || [];
+      
+      // Only generate new content if queue is getting low
+      if (currentQueue.length < 2) {
+        const newActions = await this.generateContentActions(userId, session);
+        
+        for (const action of newActions) {
+          await this.addActionToQueue(userId, action);
+        }
+        
+        console.log(`Generated ${newActions.length} new actions for user ${userId}`);
+      }
+    } catch (error) {
+      console.error(`Error populating action queue for user ${userId}:`, error);
+    }
   }
 
   /**

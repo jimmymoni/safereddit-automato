@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface AutopilotSettings {
   mode: 'conservative' | 'balanced' | 'aggressive' | 'custom';
@@ -11,8 +11,43 @@ interface AutopilotSettings {
   riskLevel: number;
 }
 
+interface ContentStrategy {
+  userPrompt: string;
+  targetNiches: string[];
+  contentTone: 'professional' | 'casual' | 'educational' | 'engaging';
+  topics: string[];
+  targetSubreddits: string[];
+  postTypes: ('text' | 'discussion' | 'advice' | 'experience')[];
+}
+
+interface AutopilotStatus {
+  isActive: boolean;
+  sessionId?: string;
+  status: string;
+  queueLength: number;
+  healthScore: number;
+  riskLevel: string;
+  actionsToday: number;
+  lastActivity?: string;
+  recommendations?: string[];
+}
+
+interface QueueAction {
+  id: string;
+  type: string;
+  time: string;
+  target: string;
+  content: string;
+  confidence: string;
+}
+
 const AutopilotControl: React.FC = () => {
   const [isAutopilotActive, setIsAutopilotActive] = useState(false);
+  const [autopilotStatus, setAutopilotStatus] = useState<AutopilotStatus | null>(null);
+  const [queueActions, setQueueActions] = useState<QueueAction[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showContentStrategy, setShowContentStrategy] = useState(false);
   const [settings, setSettings] = useState<AutopilotSettings>({
     mode: 'balanced',
     postsPerDay: 3,
@@ -23,6 +58,274 @@ const AutopilotControl: React.FC = () => {
     trendFollowing: true,
     riskLevel: 3
   });
+  const [contentStrategy, setContentStrategy] = useState<ContentStrategy>({
+    userPrompt: '',
+    targetNiches: [],
+    contentTone: 'engaging',
+    topics: [],
+    targetSubreddits: [],
+    postTypes: ['discussion', 'advice', 'experience']
+  });
+  const [testContent, setTestContent] = useState<string>('');
+  const [isGeneratingTest, setIsGeneratingTest] = useState(false);
+  const [nicheSuggestions, setNicheSuggestions] = useState<string[]>([]);
+  const [subredditSuggestions, setSubredditSuggestions] = useState<string[]>([]);
+
+  // API functions
+  const getAuthToken = () => {
+    // Try to get token from cookie (set by Reddit OAuth)
+    const token = document.cookie
+      .split('; ')
+      .find(row => row.startsWith('reddit_auth_token='))
+      ?.split('=')[1];
+    
+    return token || localStorage.getItem('auth_token');
+  };
+
+  const apiCall = async (endpoint: string, method: string = 'GET', data?: any) => {
+    const token = getAuthToken();
+    const response = await fetch(`http://localhost:8000/api${endpoint}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: data ? JSON.stringify(data) : undefined,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  };
+
+  // Fetch autopilot status
+  const fetchAutopilotStatus = async () => {
+    try {
+      const response = await apiCall('/autopilot/status');
+      if (response.success) {
+        setAutopilotStatus(response.data);
+        setIsAutopilotActive(response.data.isActive);
+      }
+    } catch (error) {
+      console.error('Error fetching autopilot status:', error);
+      setError(error instanceof Error ? error.message : 'Failed to fetch status');
+    }
+  };
+
+  // Fetch queue
+  const fetchQueue = async () => {
+    try {
+      const response = await apiCall('/autopilot/queue');
+      if (response.success) {
+        // Transform backend queue data to frontend format
+        const transformedQueue = response.data.queue.map((action: any, index: number) => ({
+          id: action.id,
+          type: action.type,
+          time: new Date(action.scheduledFor).toLocaleTimeString(),
+          target: action.data.subreddit || action.data.parentId || action.data.itemId,
+          content: action.data.title || action.data.text || `${action.type} action`,
+          confidence: action.priority === 'high' ? 'High' : action.priority === 'low' ? 'Low' : 'Medium'
+        }));
+        setQueueActions(transformedQueue);
+      }
+    } catch (error) {
+      console.error('Error fetching queue:', error);
+    }
+  };
+
+  // Start/Stop autopilot
+  const toggleAutopilot = async () => {
+    if (loading) return;
+
+    // Validation before starting
+    if (!isAutopilotActive && !contentStrategy.userPrompt.trim()) {
+      setError('Please configure your Content Strategy first. Add your content mission to guide the AI.');
+      setShowContentStrategy(true);
+      return;
+    }
+
+    if (!isAutopilotActive && contentStrategy.targetSubreddits.length === 0) {
+      setError('Please add at least one target subreddit in your Content Strategy.');
+      setShowContentStrategy(true);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (isAutopilotActive) {
+        const response = await apiCall('/autopilot/stop', 'POST');
+        if (response.success) {
+          setIsAutopilotActive(false);
+          await fetchAutopilotStatus();
+        }
+      } else {
+        const autopilotSettings = {
+          enabled: true,
+          autoPost: settings.mode !== 'conservative',
+          autoComment: true,
+          autoVote: true,
+          targetSubreddits: contentStrategy.targetSubreddits,
+          postFrequency: Math.floor((24 * 60) / settings.postsPerDay),
+          commentFrequency: Math.floor((24 * 60) / settings.commentsPerDay),
+          voteFrequency: Math.floor((24 * 60) / settings.upvotesPerDay),
+          maxPostsPerDay: settings.postsPerDay,
+          maxCommentsPerDay: settings.commentsPerDay,
+          maxVotesPerDay: settings.upvotesPerDay,
+          contentStrategy: {
+            userPrompt: contentStrategy.userPrompt,
+            targetNiches: contentStrategy.targetNiches,
+            contentTone: contentStrategy.contentTone,
+            postTypes: contentStrategy.postTypes,
+            aiGenerated: true
+          },
+          riskLevel: settings.mode,
+          pauseOnLowHealth: true,
+          minHealthScore: 50
+        };
+
+        const response = await apiCall('/autopilot/start', 'POST', { settings: autopilotSettings });
+        if (response.success) {
+          setIsAutopilotActive(true);
+          await fetchAutopilotStatus();
+        }
+      }
+    } catch (error) {
+      console.error('Error toggling autopilot:', error);
+      setError(error instanceof Error ? error.message : 'Failed to toggle autopilot');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load data on component mount
+  useEffect(() => {
+    // Only fetch if we have a token
+    const token = getAuthToken();
+    if (token) {
+      fetchAutopilotStatus();
+      fetchQueue();
+      
+      // Set up polling for real-time updates
+      const interval = setInterval(() => {
+        fetchAutopilotStatus();
+        fetchQueue();
+      }, 30000); // Poll every 30 seconds
+
+      return () => clearInterval(interval);
+    } else {
+      setError('Reddit authentication required. Please connect your Reddit account first.');
+    }
+  }, []);
+
+  // Generate intelligent suggestions based on user prompt
+  const generateSuggestions = (prompt: string) => {
+    const promptLower = prompt.toLowerCase();
+    
+    // Niche mapping
+    const nicheKeywords = {
+      'productivity': ['productive', 'efficiency', 'time management', 'organization', 'workflow', 'focus'],
+      'entrepreneurship': ['business', 'startup', 'entrepreneur', 'company', 'revenue', 'growth', 'scaling'],
+      'self improvement': ['improve', 'better', 'develop', 'growth', 'habits', 'mindset', 'goals'],
+      'career development': ['career', 'job', 'professional', 'work', 'promotion', 'skills', 'leadership'],
+      'technology': ['tech', 'software', 'coding', 'programming', 'digital', 'innovation'],
+      'finance': ['money', 'invest', 'financial', 'wealth', 'budget', 'saving', 'income'],
+      'health fitness': ['health', 'fitness', 'exercise', 'workout', 'nutrition', 'wellness'],
+      'education': ['learn', 'study', 'education', 'knowledge', 'teaching', 'academic'],
+      'marketing': ['marketing', 'advertising', 'brand', 'social media', 'content', 'audience'],
+      'freelancing': ['freelance', 'remote', 'independent', 'consultant', 'gig']
+    };
+
+    // Subreddit mapping
+    const subredditMapping: { [key: string]: string[] } = {
+      'productivity': ['productivity', 'getmotivated', 'decidingtobebetter', 'selfimprovement'],
+      'entrepreneurship': ['entrepreneur', 'startups', 'business', 'smallbusiness'],
+      'self improvement': ['selfimprovement', 'decidingtobebetter', 'getmotivated', 'discipline'],
+      'career development': ['careeradvice', 'jobs', 'careerguidance', 'professional'],
+      'technology': ['technology', 'programming', 'webdev', 'startups'],
+      'finance': ['personalfinance', 'investing', 'financialindependence', 'fire'],
+      'health fitness': ['fitness', 'loseit', 'nutrition', 'bodybuilding'],
+      'education': ['studytips', 'education', 'university', 'college'],
+      'marketing': ['marketing', 'socialmedia', 'entrepreneur', 'business'],
+      'freelancing': ['freelance', 'digitalnomad', 'entrepreneur', 'remotework']
+    };
+
+    // Find matching niches
+    const matchedNiches: string[] = [];
+    const matchedSubreddits: string[] = [];
+
+    Object.entries(nicheKeywords).forEach(([niche, keywords]) => {
+      if (keywords.some(keyword => promptLower.includes(keyword))) {
+        matchedNiches.push(niche);
+        // Add corresponding subreddits
+        if (subredditMapping[niche]) {
+          matchedSubreddits.push(...subredditMapping[niche]);
+        }
+      }
+    });
+
+    // Remove duplicates and limit suggestions
+    const uniqueNiches = Array.from(new Set(matchedNiches)).slice(0, 6);
+    const uniqueSubreddits = Array.from(new Set(matchedSubreddits)).slice(0, 8);
+    setNicheSuggestions(uniqueNiches);
+    setSubredditSuggestions(uniqueSubreddits);
+  };
+
+  // Update suggestions when user prompt changes
+  const handlePromptChange = (value: string) => {
+    setContentStrategy(prev => ({ ...prev, userPrompt: value }));
+    if (value.length > 20) { // Only suggest after meaningful input
+      generateSuggestions(value);
+    }
+  };
+
+  // Test content generation
+  const testContentGeneration = async () => {
+    if (!contentStrategy.userPrompt.trim()) {
+      setError('Please add your content mission first.');
+      return;
+    }
+
+    setIsGeneratingTest(true);
+    setTestContent('');
+
+    try {
+      const prompt = `${contentStrategy.userPrompt}\n\nTarget audience: ${contentStrategy.targetNiches.join(', ')}\nSubreddits: ${contentStrategy.targetSubreddits.map(s => `r/${s}`).join(', ')}\nContent types: ${contentStrategy.postTypes.join(', ')}\nTone: ${contentStrategy.contentTone}`;
+
+      const response = await fetch(`http://localhost:8000/api/ai/generate/test`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: prompt,
+          subreddit: contentStrategy.targetSubreddits[0],
+          contentType: contentStrategy.postTypes[0],
+          tone: contentStrategy.contentTone
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const responseData = await response.json();
+
+      if (responseData.success) {
+        setTestContent(responseData.data.content);
+      }
+    } catch (error) {
+      console.error('Error generating test content:', error);
+      setTestContent('⚠️ Could not generate test content. Please check your connection and try again.');
+    } finally {
+      setIsGeneratingTest(false);
+    }
+  };
 
   const autopilotModes = [
     {
@@ -83,13 +386,14 @@ const AutopilotControl: React.FC = () => {
         {/* Master Switch */}
         <div className="flex items-center space-x-3">
           <span className={`text-sm font-medium ${isAutopilotActive ? 'text-green-600' : 'text-reddit-gray'}`}>
-            {isAutopilotActive ? 'ACTIVE' : 'INACTIVE'}
+            {loading ? 'UPDATING...' : isAutopilotActive ? 'ACTIVE' : 'INACTIVE'}
           </span>
           <button
-            onClick={() => setIsAutopilotActive(!isAutopilotActive)}
+            onClick={toggleAutopilot}
+            disabled={loading}
             className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-reddit-primary focus:ring-offset-2 ${
               isAutopilotActive ? 'bg-green-600' : 'bg-gray-200'
-            }`}
+            } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             <span
               className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
@@ -100,6 +404,31 @@ const AutopilotControl: React.FC = () => {
         </div>
       </div>
 
+      {/* Error Message */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-start">
+            <span className="text-red-600">⚠️</span>
+            <div className="ml-3">
+              <div className="text-sm font-medium text-red-800">
+                {error.includes('authentication') ? 'Authentication Required' : 'Error'}
+              </div>
+              <div className="text-sm text-red-700">{error}</div>
+              {error.includes('authentication') && (
+                <div className="mt-2">
+                  <button 
+                    onClick={() => window.location.href = '/reddit-connect'}
+                    className="text-sm bg-reddit-primary text-white px-3 py-1 rounded hover:bg-reddit-primary/90"
+                  >
+                    Connect Reddit Account
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Autopilot Status Dashboard */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
@@ -107,26 +436,42 @@ const AutopilotControl: React.FC = () => {
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2"></div>
             <span className="text-sm font-medium text-green-800">Account Health</span>
           </div>
-          <div className="text-2xl font-bold text-green-600 mt-1">Excellent</div>
-          <div className="text-xs text-green-600">Risk Level: Low</div>
+          <div className="text-2xl font-bold text-green-600 mt-1">
+            {autopilotStatus?.healthScore ? `${autopilotStatus.healthScore}/100` : 'Loading...'}
+          </div>
+          <div className="text-xs text-green-600">
+            Risk Level: {autopilotStatus?.riskLevel || 'Unknown'}
+          </div>
         </div>
 
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
           <div className="text-sm font-medium text-blue-800">Today's Actions</div>
-          <div className="text-2xl font-bold text-blue-600 mt-1">12/15</div>
-          <div className="text-xs text-blue-600">80% Complete</div>
+          <div className="text-2xl font-bold text-blue-600 mt-1">
+            {autopilotStatus?.actionsToday || 0}
+          </div>
+          <div className="text-xs text-blue-600">
+            Queue: {autopilotStatus?.queueLength || 0} pending
+          </div>
         </div>
 
         <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-          <div className="text-sm font-medium text-purple-800">AI Insights</div>
-          <div className="text-2xl font-bold text-purple-600 mt-1">3</div>
-          <div className="text-xs text-purple-600">New Opportunities</div>
+          <div className="text-sm font-medium text-purple-800">Status</div>
+          <div className="text-2xl font-bold text-purple-600 mt-1">
+            {autopilotStatus?.status || 'Unknown'}
+          </div>
+          <div className="text-xs text-purple-600">
+            {autopilotStatus?.sessionId ? `Session: ${autopilotStatus.sessionId.slice(0, 8)}...` : 'No active session'}
+          </div>
         </div>
 
         <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
           <div className="text-sm font-medium text-orange-800">Next Action</div>
-          <div className="text-sm font-bold text-orange-600 mt-1">Comment in</div>
-          <div className="text-xs text-orange-600">r/productivity (2m)</div>
+          <div className="text-sm font-bold text-orange-600 mt-1">
+            {queueActions.length > 0 ? queueActions[0].type : 'None scheduled'}
+          </div>
+          <div className="text-xs text-orange-600">
+            {queueActions.length > 0 ? `${queueActions[0].target} (${queueActions[0].time})` : 'Queue is empty'}
+          </div>
         </div>
       </div>
 
@@ -152,6 +497,302 @@ const AutopilotControl: React.FC = () => {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Content Strategy Section */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-reddit-dark">Content Strategy</h3>
+          <button
+            onClick={() => setShowContentStrategy(!showContentStrategy)}
+            className="text-sm text-reddit-primary hover:text-reddit-primary/80 flex items-center space-x-1"
+          >
+            <span>{showContentStrategy ? 'Hide' : 'Configure'}</span>
+            <span>{showContentStrategy ? '▲' : '▼'}</span>
+          </button>
+        </div>
+
+        {showContentStrategy && (
+          <div className="bg-reddit-bg rounded-lg p-6 space-y-6">
+            {/* User Prompt Section */}
+            <div>
+              <label className="block text-sm font-medium text-reddit-dark mb-2">
+                🎯 Your Content Mission
+              </label>
+              <textarea
+                value={contentStrategy.userPrompt}
+                onChange={(e) => handlePromptChange(e.target.value)}
+                placeholder="Tell the AI what you want to achieve on Reddit. E.g., 'I want to share productivity tips and build authority in the entrepreneurship space. Focus on actionable advice and personal experiences that help others grow their businesses.'"
+                className="w-full h-32 p-3 border border-reddit-border rounded-lg resize-none focus:ring-2 focus:ring-reddit-primary focus:border-transparent"
+              />
+              <div className="mt-2 text-xs text-reddit-gray">
+                This guides the AI on what type of content to create and how to position you in the community.
+              </div>
+            </div>
+
+            {/* Target Niches */}
+            <div>
+              <label className="block text-sm font-medium text-reddit-dark mb-2">
+                📊 Target Niches
+              </label>
+              
+              {/* Suggestions */}
+              {nicheSuggestions.length > 0 && (
+                <div className="mb-3">
+                  <div className="text-xs text-reddit-gray mb-2">💡 Suggested based on your content mission:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {nicheSuggestions.map((suggestion, index) => (
+                      <button
+                        key={index}
+                        onClick={() => {
+                          if (!contentStrategy.targetNiches.includes(suggestion)) {
+                            setContentStrategy(prev => ({
+                              ...prev,
+                              targetNiches: [...prev.targetNiches, suggestion]
+                            }));
+                          }
+                        }}
+                        className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs hover:bg-blue-100 border border-blue-200"
+                      >
+                        + {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Selected Niches */}
+              <div className="flex flex-wrap gap-2 mb-3">
+                {contentStrategy.targetNiches.map((niche, index) => (
+                  <span
+                    key={index}
+                    className="px-3 py-1 bg-reddit-primary/10 text-reddit-primary rounded-full text-sm flex items-center space-x-1"
+                  >
+                    <span>{niche}</span>
+                    <button
+                      onClick={() => setContentStrategy(prev => ({
+                        ...prev,
+                        targetNiches: prev.targetNiches.filter((_, i) => i !== index)
+                      }))}
+                      className="text-reddit-primary hover:text-red-500 ml-1"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+              
+              {/* Manual Input */}
+              <input
+                type="text"
+                placeholder="Add a niche (e.g., productivity, entrepreneurship) and press Enter"
+                className="w-full p-2 border border-reddit-border rounded-lg text-sm"
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    const value = e.currentTarget.value.trim();
+                    if (value && !contentStrategy.targetNiches.includes(value)) {
+                      setContentStrategy(prev => ({
+                        ...prev,
+                        targetNiches: [...prev.targetNiches, value]
+                      }));
+                      e.currentTarget.value = '';
+                    }
+                  }
+                }}
+              />
+            </div>
+
+            {/* Content Tone */}
+            <div>
+              <label className="block text-sm font-medium text-reddit-dark mb-2">
+                🎨 Content Tone
+              </label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {['professional', 'casual', 'educational', 'engaging'].map((tone) => (
+                  <button
+                    key={tone}
+                    onClick={() => setContentStrategy(prev => ({ ...prev, contentTone: tone as any }))}
+                    className={`p-3 rounded-lg border-2 text-sm transition-all ${
+                      contentStrategy.contentTone === tone
+                        ? 'border-reddit-primary bg-reddit-primary/5 text-reddit-primary'
+                        : 'border-reddit-border hover:border-reddit-primary/50 text-reddit-gray'
+                    }`}
+                  >
+                    <div className="font-medium capitalize">{tone}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Target Subreddits */}
+            <div>
+              <label className="block text-sm font-medium text-reddit-dark mb-2">
+                🎯 Target Subreddits
+              </label>
+              
+              {/* Suggestions */}
+              {subredditSuggestions.length > 0 && (
+                <div className="mb-3">
+                  <div className="text-xs text-reddit-gray mb-2">💡 Recommended subreddits for your niche:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {subredditSuggestions.map((suggestion, index) => (
+                      <button
+                        key={index}
+                        onClick={() => {
+                          if (!contentStrategy.targetSubreddits.includes(suggestion)) {
+                            setContentStrategy(prev => ({
+                              ...prev,
+                              targetSubreddits: [...prev.targetSubreddits, suggestion]
+                            }));
+                          }
+                        }}
+                        className="px-2 py-1 bg-green-50 text-green-700 rounded text-xs hover:bg-green-100 border border-green-200"
+                      >
+                        + r/{suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Selected Subreddits */}
+              <div className="flex flex-wrap gap-2 mb-3">
+                {contentStrategy.targetSubreddits.map((subreddit, index) => (
+                  <div
+                    key={index}
+                    className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm flex items-center space-x-1"
+                  >
+                    <a
+                      href={`https://reddit.com/r/${subreddit}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:underline cursor-pointer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      r/{subreddit}
+                    </a>
+                    <button
+                      onClick={() => setContentStrategy(prev => ({
+                        ...prev,
+                        targetSubreddits: prev.targetSubreddits.filter((_, i) => i !== index)
+                      }))}
+                      className="text-green-800 hover:text-red-500 ml-1"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Manual Input */}
+              <input
+                type="text"
+                placeholder="Add subreddit (without r/) and press Enter"
+                className="w-full p-2 border border-reddit-border rounded-lg text-sm"
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    const value = e.currentTarget.value.trim().toLowerCase();
+                    if (value && !contentStrategy.targetSubreddits.includes(value)) {
+                      setContentStrategy(prev => ({
+                        ...prev,
+                        targetSubreddits: [...prev.targetSubreddits, value]
+                      }));
+                      e.currentTarget.value = '';
+                    }
+                  }
+                }}
+              />
+              <div className="mt-1 text-xs text-reddit-gray">
+                Click on any r/subreddit tag to open it in a new tab
+              </div>
+            </div>
+
+            {/* Post Types */}
+            <div>
+              <label className="block text-sm font-medium text-reddit-dark mb-2">
+                📝 Content Types
+              </label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {[
+                  { id: 'text', label: '📄 Text Posts', desc: 'Long-form content' },
+                  { id: 'discussion', label: '💬 Discussions', desc: 'Questions & debates' },
+                  { id: 'advice', label: '💡 Advice', desc: 'Tips & guidance' },
+                  { id: 'experience', label: '📖 Stories', desc: 'Personal experiences' }
+                ].map((type) => (
+                  <button
+                    key={type.id}
+                    onClick={() => {
+                      const isSelected = contentStrategy.postTypes.includes(type.id as any);
+                      setContentStrategy(prev => ({
+                        ...prev,
+                        postTypes: isSelected
+                          ? prev.postTypes.filter(t => t !== type.id)
+                          : [...prev.postTypes, type.id as any]
+                      }));
+                    }}
+                    className={`p-3 rounded-lg border-2 text-left transition-all ${
+                      contentStrategy.postTypes.includes(type.id as any)
+                        ? 'border-reddit-primary bg-reddit-primary/5'
+                        : 'border-reddit-border hover:border-reddit-primary/50'
+                    }`}
+                  >
+                    <div className="text-sm font-medium">{type.label}</div>
+                    <div className="text-xs text-reddit-gray">{type.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Preview Section */}
+            <div className="border-t border-reddit-border pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-medium text-reddit-dark">🔮 AI Content Preview</h4>
+                <button 
+                  onClick={testContentGeneration}
+                  disabled={isGeneratingTest || !contentStrategy.userPrompt.trim()}
+                  className="text-sm bg-reddit-primary text-white px-3 py-1 rounded hover:bg-reddit-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isGeneratingTest ? '⏳ Generating...' : '🎯 Test Generate'}
+                </button>
+              </div>
+              
+              <div className="bg-white rounded-lg p-4 border border-reddit-border">
+                {testContent ? (
+                  <div>
+                    <div className="text-sm text-reddit-gray mb-2">✨ AI-Generated Content Sample:</div>
+                    <div className="text-sm bg-gray-50 p-3 rounded border italic">
+                      {testContent}
+                    </div>
+                    <div className="mt-3 text-xs text-green-600">
+                      ✅ Ready! This is the type of content the AI will create for your autopilot.
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="text-sm text-reddit-gray mb-2">
+                      {contentStrategy.userPrompt ? 'Click "Test Generate" to see AI-created content sample:' : 'Configure your content mission above to test AI generation:'}
+                    </div>
+                    <div className="text-sm">
+                      {contentStrategy.userPrompt || '⬆️ Add your content mission in the text area above...'}
+                    </div>
+                  </div>
+                )}
+                
+                <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                  <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded">
+                    {contentStrategy.contentTone} tone
+                  </span>
+                  <span className="px-2 py-1 bg-green-100 text-green-800 rounded">
+                    {contentStrategy.targetSubreddits.length} subreddits
+                  </span>
+                  <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded">
+                    {contentStrategy.postTypes.length} content types
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Advanced Settings */}
@@ -270,25 +911,22 @@ const AutopilotControl: React.FC = () => {
 
       {/* Autopilot Queue Preview */}
       <div className="mb-6">
-        <h4 className="font-semibold text-reddit-dark mb-4">Autopilot Queue (Next 24h)</h4>
+        <h4 className="font-semibold text-reddit-dark mb-4">
+          Autopilot Queue ({queueActions.length} actions)
+        </h4>
         <div className="space-y-2 max-h-40 overflow-y-auto">
-          {[
-            { time: '2:30 PM', action: 'Post', target: 'r/productivity', content: '"5 habits that doubled my output"', confidence: 'High' },
-            { time: '3:45 PM', action: 'Comment', target: 'r/entrepreneur', content: 'Reply to trending post about startups', confidence: 'Medium' },
-            { time: '5:20 PM', action: 'Upvote', target: '3 posts', content: 'Strategic upvoting in target communities', confidence: 'Low Risk' },
-            { time: '7:15 PM', action: 'Post', target: 'r/selfimprovement', content: '"My morning routine transformation"', confidence: 'High' },
-          ].map((item, index) => (
-            <div key={index} className="flex items-center justify-between p-3 bg-reddit-bg rounded-lg text-sm">
+          {queueActions.length > 0 ? queueActions.map((item, index) => (
+            <div key={item.id} className="flex items-center justify-between p-3 bg-reddit-bg rounded-lg text-sm">
               <div className="flex items-center space-x-3">
                 <span className="font-mono text-reddit-gray">{item.time}</span>
                 <span className={`px-2 py-1 rounded text-xs font-medium ${
-                  item.action === 'Post' ? 'bg-blue-100 text-blue-800' :
-                  item.action === 'Comment' ? 'bg-green-100 text-green-800' :
+                  item.type === 'post' ? 'bg-blue-100 text-blue-800' :
+                  item.type === 'comment' ? 'bg-green-100 text-green-800' :
                   'bg-orange-100 text-orange-800'
                 }`}>
-                  {item.action}
+                  {item.type}
                 </span>
-                <span className="text-reddit-dark">{item.target}</span>
+                <span className="text-reddit-dark truncate max-w-xs">{item.target}</span>
               </div>
               <div className="flex items-center space-x-2">
                 <span className={`text-xs px-2 py-1 rounded ${
@@ -300,7 +938,13 @@ const AutopilotControl: React.FC = () => {
                 </span>
               </div>
             </div>
-          ))}
+          )) : (
+            <div className="text-center text-reddit-gray py-8">
+              <div className="text-lg mb-2">📅</div>
+              <div>No actions scheduled</div>
+              <div className="text-sm">Queue will populate when autopilot is active</div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -311,10 +955,12 @@ const AutopilotControl: React.FC = () => {
             isAutopilotActive 
               ? 'bg-red-600 text-white hover:bg-red-700' 
               : 'bg-reddit-primary text-white hover:bg-reddit-primary/90'
-          }`}
-          onClick={() => setIsAutopilotActive(!isAutopilotActive)}
+          } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+          onClick={toggleAutopilot}
+          disabled={loading}
         >
-          {isAutopilotActive ? '⏹️ Stop Autopilot' : '🚀 Start Autopilot'}
+          {loading ? '⏳ Processing...' : 
+           isAutopilotActive ? '⏹️ Stop Autopilot' : '🚀 Start Autopilot'}
         </button>
         <button className="px-6 py-3 border border-reddit-border text-reddit-dark rounded-lg hover:bg-reddit-bg transition-colors">
           📊 View Analytics

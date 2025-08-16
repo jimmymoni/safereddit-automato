@@ -5,9 +5,9 @@ const prisma = new PrismaClient();
 
 class KimiAIService {
   constructor() {
-    this.apiKey = process.env.KIMI_API_KEY;
-    this.baseURL = 'https://api.moonshot.cn/v1';
-    this.defaultModel = 'moonshot-v1-8k'; // Default to 8k for most content
+    this.apiKey = process.env.OPENAI_API_KEY;
+    this.baseURL = 'https://api.openai.com/v1';
+    this.defaultModel = 'gpt-3.5-turbo'; // Using GPT-3.5 for cost efficiency
     
     // Initialize axios client
     this.client = axios.create({
@@ -25,6 +25,12 @@ class KimiAIService {
    */
   async generatePost(prompt, options = {}) {
     try {
+      // Check if API key is configured
+      if (!this.apiKey || this.apiKey === 'your_openai_api_key_here') {
+        console.log('OpenAI API key not configured, using fallback content generation');
+        return this.generateFallbackContent(prompt, options);
+      }
+
       const {
         subreddit = '',
         contentType = 'text',
@@ -44,6 +50,7 @@ Key guidelines:
 - Keep posts concise but engaging
 - Include relevant context and details
 - Follow Reddit's posting etiquette
+- Format as: Title on first line, then content
 
 Target subreddit: ${subreddit || 'general'}
 Content type: ${contentType}
@@ -61,7 +68,7 @@ Desired tone: ${tone}`;
       });
 
       if (!response.data || !response.data.choices || !response.data.choices[0]) {
-        throw new Error('Invalid response from Kimi API');
+        throw new Error('Invalid response from OpenAI API');
       }
 
       const generatedContent = response.data.choices[0].message.content.trim();
@@ -75,9 +82,85 @@ Desired tone: ${tone}`;
       };
 
     } catch (error) {
-      console.error('Kimi AI post generation error:', error);
-      throw new Error(`Failed to generate post content: ${error.message}`);
+      console.error('OpenAI post generation error:', error);
+      
+      // Fallback to template-based content if API fails
+      console.log('Falling back to template-based content generation');
+      return this.generateFallbackContent(prompt, options);
     }
+  }
+
+  /**
+   * Fallback content generation when Kimi AI is unavailable
+   */
+  async generateFallbackContent(prompt, options = {}) {
+    const {
+      subreddit = '',
+      contentType = 'text',
+      tone = 'engaging'
+    } = options;
+
+    // Extract key themes from the user prompt
+    const themes = this.extractThemes(prompt);
+    const templates = this.getContentTemplates(contentType, tone);
+    const template = templates[Math.floor(Math.random() * templates.length)];
+    
+    // Generate content based on template and themes
+    const content = template
+      .replace('{theme}', themes[0] || 'productivity')
+      .replace('{subreddit}', subreddit)
+      .replace('{tone_word}', tone === 'professional' ? 'insights' : tone === 'casual' ? 'tips' : 'strategies');
+
+    return {
+      content: content,
+      model: 'fallback-template',
+      tokensUsed: content.length / 4, // Rough token estimate
+      promptTokens: prompt.length / 4,
+      completionTokens: content.length / 4
+    };
+  }
+
+  /**
+   * Extract themes from user prompt
+   */
+  extractThemes(prompt) {
+    const commonThemes = [
+      'productivity', 'entrepreneurship', 'self-improvement', 'business growth',
+      'time management', 'goal setting', 'career development', 'leadership',
+      'innovation', 'success habits', 'mindset', 'work-life balance'
+    ];
+    
+    const promptLower = prompt.toLowerCase();
+    const foundThemes = commonThemes.filter(theme => 
+      promptLower.includes(theme.toLowerCase())
+    );
+    
+    return foundThemes.length > 0 ? foundThemes : ['productivity'];
+  }
+
+  /**
+   * Get content templates based on type and tone
+   */
+  getContentTemplates(contentType, tone) {
+    const templates = {
+      discussion: [
+        "What's your experience with {theme}? I've been exploring different approaches and would love to hear what's worked for others in r/{subreddit}.",
+        "Quick question for the r/{subreddit} community: What are your top 3 {tone_word} for {theme}? Looking to improve my approach.",
+        "Has anyone else noticed how {theme} impacts daily productivity? Curious about your experiences and {tone_word}."
+      ],
+      advice: [
+        "Here are 5 {tone_word} for {theme} that have transformed my approach. What would you add to this list?",
+        "After months of experimenting with {theme}, here's what actually works. Hope this helps someone in r/{subreddit}.",
+        "Common {theme} mistakes I see people making (and how to avoid them). What other pitfalls should we watch out for?"
+      ],
+      experience: [
+        "My journey with {theme}: What I learned after 6 months of focused effort. Sharing in case it helps others in r/{subreddit}.",
+        "How {theme} changed my perspective on productivity. Here's my honest experience and key takeaways.",
+        "The {theme} experiment: 30 days of testing different approaches. Here are the surprising results."
+      ]
+    };
+
+    return templates[contentType] || templates.discussion;
   }
 
   /**
