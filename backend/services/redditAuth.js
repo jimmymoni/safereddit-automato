@@ -164,6 +164,8 @@ class RedditAuthService {
         throw new Error('No refresh token available');
       }
 
+      // Create a new snoowrap instance with refresh token
+      // snoowrap will automatically handle token refresh
       const reddit = new snoowrap({
         userAgent: this.userAgent,
         clientId: this.clientId,
@@ -171,22 +173,21 @@ class RedditAuthService {
         refreshToken: user.redditRefreshToken
       });
 
-      // Refresh the token
-      await reddit.refresh();
+      // Make a simple API call to trigger token refresh if needed
+      await reddit.getMe();
 
-      // Update token in database
+      // Update token expiry in database (snoowrap handles the actual token internally)
       const tokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
       
       await prisma.user.update({
         where: { id: userId },
         data: {
-          redditToken: reddit.accessToken,
           redditTokenExpiry: tokenExpiry,
           updatedAt: new Date()
         }
       });
 
-      return reddit.accessToken;
+      return reddit; // Return the reddit instance instead of just token
 
     } catch (error) {
       console.error('Error refreshing Reddit token:', error);
@@ -203,21 +204,30 @@ class RedditAuthService {
         where: { id: userId }
       });
 
-      if (!user || !user.redditToken) {
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      // If user has a refresh token, use that for a more reliable connection
+      if (user.redditRefreshToken) {
+        const reddit = new snoowrap({
+          userAgent: this.userAgent,
+          clientId: this.clientId,
+          clientSecret: this.clientSecret,
+          refreshToken: user.redditRefreshToken
+        });
+
+        return reddit;
+      }
+
+      // Fallback to access token if no refresh token
+      if (!user.redditToken) {
         throw new Error('User not authenticated with Reddit');
       }
 
       // Check if token is expired
       if (user.redditTokenExpiry && user.redditTokenExpiry < new Date()) {
-        // Try to refresh token
-        await this.refreshRedditToken(userId);
-        
-        // Fetch updated user
-        const updatedUser = await prisma.user.findUnique({
-          where: { id: userId }
-        });
-        
-        user.redditToken = updatedUser.redditToken;
+        throw new Error('Reddit token expired and no refresh token available');
       }
 
       const reddit = new snoowrap({
