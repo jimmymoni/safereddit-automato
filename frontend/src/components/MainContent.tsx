@@ -21,7 +21,17 @@ const MainContent: React.FC = () => {
     setTrendsError(null);
     
     try {
-      const token = localStorage.getItem('token');
+      // Get JWT token from cookie (same as useRedditUser hook)
+      const token = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('reddit_auth_token='))
+        ?.split('=')[1];
+        
+      if (!token) {
+        setTrendsError('Reddit authentication required');
+        return;
+      }
+      
       const response = await fetch('http://localhost:8000/api/reddit/trending/subscribed?limit=25', {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -49,7 +59,17 @@ const MainContent: React.FC = () => {
     if (!redditUser.connected) return;
     
     try {
-      const token = localStorage.getItem('token');
+      // Get JWT token from cookie (same as useRedditUser hook)
+      const token = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('reddit_auth_token='))
+        ?.split('=')[1];
+        
+      if (!token) {
+        console.log('No Reddit auth token found');
+        return;
+      }
+      
       const response = await fetch('http://localhost:8000/api/reddit/subscriptions', {
         headers: {
           'Authorization': `Bearer ${token}`,
