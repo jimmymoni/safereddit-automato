@@ -16,7 +16,7 @@ class RedditAuthService {
    * Generate Reddit OAuth URL for user authorization
    */
   getAuthorizationUrl() {
-    const scopes = ['identity', 'read', 'submit', 'vote', 'edit', 'history'];
+    const scopes = ['identity', 'read', 'submit', 'vote', 'edit', 'history', 'mysubreddits'];
     const state = this.generateRandomString(32); // CSRF protection
     
     const authUrl = snoowrap.getAuthUrl({
@@ -200,13 +200,24 @@ class RedditAuthService {
    */
   async getRedditInstance(userId) {
     try {
+      console.log('Getting Reddit instance for user ID:', userId);
       const user = await prisma.user.findUnique({
         where: { id: userId }
       });
 
       if (!user) {
+        console.log('User not found in database:', userId);
         throw new Error('User not found');
       }
+
+      console.log('User found:', {
+        id: user.id,
+        email: user.email,
+        redditUsername: user.redditUsername,
+        hasRedditToken: !!user.redditToken,
+        hasRefreshToken: !!user.redditRefreshToken,
+        tokenExpiry: user.redditTokenExpiry
+      });
 
       // If user has a refresh token, use that for a more reliable connection
       if (user.redditRefreshToken) {

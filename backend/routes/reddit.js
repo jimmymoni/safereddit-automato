@@ -278,6 +278,7 @@ router.get('/profile', verifyToken, async (req, res) => {
 router.get('/subscriptions', verifyToken, async (req, res) => {
   try {
     const userId = req.user.userId;
+    console.log('Fetching subscriptions for user ID:', userId);
 
     const result = await redditAPI.getUserSubscriptions(userId);
     
