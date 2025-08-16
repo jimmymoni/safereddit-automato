@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
+const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('@prisma/client');
 require('dotenv').config({ path: '../.env' });
 
@@ -81,52 +82,146 @@ app.use('/api/autopilot', autopilotRoutes);
 app.use('/api/reddit', redditRoutes);
 app.use('/api/insights', insightsRoutes);
 
-// User dashboard endpoint with safety middleware
+// User dashboard endpoint with safety middleware (real data with fallback)
 app.get('/api/user/dashboard', safetyMiddleware('dashboard_fetch'), async (req, res) => {
   try {
-    // Mock data for now - will be replaced with real user data
-    const mockData = {
-      user: {
-        username: 'u/automator',
-        postKarma: 1247,
-        commentKarma: 892,
-        accountAge: '2 months',
-        personaHealth: 78
-      },
-      todayStats: {
-        postsScheduled: 3,
-        commentsMade: 7,
-        upvotesGiven: 24,
-        karmaGained: 18
-      },
-      recentActivity: [
-        {
-          id: 1,
-          action: 'Posted in r/productivity',
-          timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-          result: 'success',
-          karma: '+12'
-        },
-        {
-          id: 2,
-          action: 'Commented in r/entrepreneur',
-          timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000), // 4 hours ago
-          result: 'success',
-          karma: '+5'
-        },
-        {
-          id: 3,
-          action: 'Auto-upvoted 3 posts',
-          timestamp: new Date(Date.now() - 6 * 60 * 60 * 1000), // 6 hours ago
-          result: 'success',
-          karma: '0'
+    // Try to get real user data first
+    let dashboardData;
+    
+    try {
+      // Get JWT token from authorization header
+      const token = req.header('Authorization')?.replace('Bearer ', '');
+      let userId = null;
+      
+      if (token) {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        userId = decoded.userId;
+      }
+      
+      if (userId) {
+        // Fetch real user data from database and Reddit API
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          include: {
+            activityLogs: {
+              orderBy: { createdAt: 'desc' },
+              take: 10
+            },
+            contentItems: {
+              where: {
+                createdAt: {
+                  gte: new Date(new Date().setHours(0, 0, 0, 0)) // Today
+                }
+              }
+            }
+          }
+        });
+        
+        if (user && user.redditUsername) {
+          // Get Reddit profile data
+          const redditAPI = new (require('./services/redditAPI'))();
+          let redditProfile = null;
+          
+          try {
+            redditProfile = await redditAPI.getUserProfile(userId);
+          } catch (redditError) {
+            console.log('Reddit API unavailable, using stored data');
+          }
+          
+          // Calculate today's stats from activity logs
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          
+          const todayLogs = user.activityLogs.filter(log => 
+            new Date(log.createdAt) >= today
+          );
+          
+          const todayStats = {
+            postsScheduled: user.contentItems.filter(item => item.status === 'scheduled').length,
+            commentsMade: todayLogs.filter(log => log.action === 'comment_submitted').length,
+            upvotesGiven: todayLogs.filter(log => log.action === 'content_upvoted').length,
+            karmaGained: redditProfile ? 
+              (redditProfile.postKarma + redditProfile.commentKarma) - 
+              (user.lastKarmaCheck || 0) : 0
+          };
+          
+          // Format recent activity
+          const recentActivity = user.activityLogs.slice(0, 5).map(log => ({
+            id: log.id,
+            action: formatActivityAction(log.action, log.target),
+            timestamp: log.createdAt,
+            result: log.result,
+            karma: log.metadata?.karma || '0'
+          }));
+          
+          // Calculate account age
+          const accountAge = user.createdAt ? 
+            Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24 * 30)) : 0;
+          
+          dashboardData = {
+            user: {
+              username: `u/${user.redditUsername}`,
+              postKarma: redditProfile?.postKarma || 0,
+              commentKarma: redditProfile?.commentKarma || 0,
+              accountAge: accountAge > 0 ? `${accountAge} months` : 'New account',
+              personaHealth: calculatePersonaHealth(user, todayLogs)
+            },
+            todayStats,
+            recentActivity
+          };
         }
-      ]
-    };
+      }
+    } catch (realDataError) {
+      console.log('Could not fetch real data, using fallback:', realDataError.message);
+    }
+    
+    // Fallback to mock data if real data fails
+    if (!dashboardData) {
+      console.log('Using fallback mock data for dashboard');
+      dashboardData = {
+        user: {
+          username: 'u/demo_user',
+          postKarma: 1247,
+          commentKarma: 892,
+          accountAge: '2 months',
+          personaHealth: 78
+        },
+        todayStats: {
+          postsScheduled: 3,
+          commentsMade: 7,
+          upvotesGiven: 24,
+          karmaGained: 18
+        },
+        recentActivity: [
+          {
+            id: 1,
+            action: 'Posted in r/productivity',
+            timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
+            result: 'success',
+            karma: '+12'
+          },
+          {
+            id: 2,
+            action: 'Commented in r/entrepreneur',
+            timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000),
+            result: 'success',
+            karma: '+5'
+          },
+          {
+            id: 3,
+            action: 'Auto-upvoted 3 posts',
+            timestamp: new Date(Date.now() - 6 * 60 * 60 * 1000),
+            result: 'success',
+            karma: '0'
+          }
+        ]
+      };
+    }
 
     res.json({
       success: true,
-      data: mockData
+      data: dashboardData,
+      usingRealData: dashboardData.user.username !== 'u/demo_user'
     });
 
   } catch (error) {
@@ -137,6 +232,36 @@ app.get('/api/user/dashboard', safetyMiddleware('dashboard_fetch'), async (req, 
     });
   }
 });
+
+// Helper function to format activity actions
+function formatActivityAction(action, target) {
+  switch (action) {
+    case 'post_submitted':
+      return `Posted in ${target}`;
+    case 'comment_submitted':
+      return `Commented in ${target}`;
+    case 'content_upvoted':
+      return `Upvoted content in ${target}`;
+    default:
+      return action;
+  }
+}
+
+// Helper function to calculate persona health
+function calculatePersonaHealth(user, todayLogs) {
+  // Basic calculation based on recent activity and account status
+  let health = 50; // Base score
+  
+  // Bonus for recent activity
+  health += Math.min(todayLogs.length * 5, 30);
+  
+  // Bonus for successful actions
+  const successfulActions = todayLogs.filter(log => log.result === 'success').length;
+  health += successfulActions * 3;
+  
+  // Cap at 100
+  return Math.min(health, 100);
+}
 
 // Content management endpoints
 app.get('/api/content/vault', (req, res) => {
