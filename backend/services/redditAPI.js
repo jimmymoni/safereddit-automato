@@ -7,6 +7,8 @@ const prisma = new PrismaClient();
 class RedditAPIService {
   constructor() {
     this.redditAuth = new RedditAuthService();
+    this.cache = new Map();
+    this.CACHE_TTL = 3 * 60 * 1000; // 3 minutes
   }
 
   /**
@@ -340,21 +342,36 @@ class RedditAPIService {
   }
 
   /**
-   * Get trending posts from multiple subreddits
+   * Get trending posts from multiple subreddits (optimized with caching and parallel requests)
    */
   async getTrendingPosts(userId, subreddits = ['all'], limit = 25) {
     try {
+      // Check cache first
+      const cacheKey = `trending_${userId}_${subreddits.sort().join(',')}_${limit}`;
+      const cached = this.cache.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp) < this.CACHE_TTL) {
+        console.log('Returning cached trending posts');
+        return cached.data;
+      }
+
       const reddit = await this.redditAuth.getRedditInstance(userId);
       
-      const trendingPosts = [];
+      // Limit concurrent subreddit requests to avoid overwhelming Reddit API
+      const maxConcurrent = Math.min(subreddits.length, 5);
+      const batches = [];
+      for (let i = 0; i < subreddits.length; i += maxConcurrent) {
+        batches.push(subreddits.slice(i, i + maxConcurrent));
+      }
 
-      for (const subredditName of subreddits) {
-        try {
-          const subreddit = await reddit.getSubreddit(subredditName);
-          const posts = await subreddit.getHot({ limit: Math.ceil(limit / subreddits.length) });
-          
-          for (const post of posts) {
-            trendingPosts.push({
+      const allTrendingPosts = [];
+      
+      for (const batch of batches) {
+        const batchPromises = batch.map(async (subredditName) => {
+          try {
+            const subreddit = await reddit.getSubreddit(subredditName);
+            const posts = await subreddit.getHot({ limit: Math.ceil(limit / subreddits.length) });
+            
+            return posts.map(post => ({
               id: post.id,
               fullname: post.name,
               title: post.title,
@@ -374,17 +391,31 @@ class RedditAPIService {
                 engagement: this.calculateEngagement(post),
                 trending: this.calculateTrendingScore(post)
               }
-            });
+            }));
+          } catch (subredditError) {
+            console.log(`Error fetching from r/${subredditName}:`, subredditError.message);
+            return [];
           }
-        } catch (subredditError) {
-          console.log(`Error fetching from r/${subredditName}:`, subredditError.message);
-        }
+        });
+        
+        const batchResults = await Promise.all(batchPromises);
+        allTrendingPosts.push(...batchResults.flat());
       }
 
       // Sort by trending score
-      trendingPosts.sort((a, b) => b.analysis.trending - a.analysis.trending);
+      allTrendingPosts.sort((a, b) => b.analysis.trending - a.analysis.trending);
+      const result = allTrendingPosts.slice(0, limit);
+      
+      // Cache the result
+      this.cache.set(cacheKey, {
+        data: result,
+        timestamp: Date.now()
+      });
+      
+      // Clean old cache entries
+      this.cleanCache();
 
-      return trendingPosts.slice(0, limit);
+      return result;
 
     } catch (error) {
       console.error('Error getting trending posts:', error);
@@ -423,10 +454,18 @@ class RedditAPIService {
   }
 
   /**
-   * Get user's subscribed subreddits
+   * Get user's subscribed subreddits (with caching)
    */
   async getUserSubscriptions(userId) {
     try {
+      // Check cache first
+      const cacheKey = `subscriptions_${userId}`;
+      const cached = this.cache.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp) < this.CACHE_TTL) {
+        console.log('Returning cached subscriptions');
+        return cached.data;
+      }
+
       const reddit = await this.redditAuth.getRedditInstance(userId);
       
       // Get user's subscribed subreddits
@@ -447,11 +486,19 @@ class RedditAPIService {
       // Sort by subscriber count (most popular first)
       subreddits.sort((a, b) => b.subscribers - a.subscribers);
 
-      return {
+      const result = {
         subreddits,
         count: subreddits.length,
         totalSubscribers: subreddits.reduce((sum, sub) => sum + sub.subscribers, 0)
       };
+      
+      // Cache the result
+      this.cache.set(cacheKey, {
+        data: result,
+        timestamp: Date.now()
+      });
+      
+      return result;
 
     } catch (error) {
       console.error('Error getting user subscriptions:', error);
@@ -573,6 +620,18 @@ class RedditAPIService {
     const commentsPerHour = hoursOld > 0 ? post.num_comments / hoursOld : post.num_comments;
     
     return Math.round(scorePerHour * 0.6 + commentsPerHour * 0.4);
+  }
+  
+  /**
+   * Clean expired cache entries
+   */
+  cleanCache() {
+    const now = Date.now();
+    for (const [key, value] of this.cache.entries()) {
+      if (now - value.timestamp > this.CACHE_TTL) {
+        this.cache.delete(key);
+      }
+    }
   }
 }
 

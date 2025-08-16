@@ -12,10 +12,20 @@ const MainContent: React.FC = () => {
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [isLoadingTrends, setIsLoadingTrends] = useState(false);
   const [trendsError, setTrendsError] = useState<string | null>(null);
+  const [trendsCache, setTrendsCache] = useState<{data: any, timestamp: number} | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
-  // Fetch trending posts from user's subscribed subreddits
-  const fetchTrendingPosts = useCallback(async () => {
+  // Fetch trending posts and subscriptions in parallel
+  const fetchTrendingData = useCallback(async (forceRefresh = false) => {
     if (!redditUser.connected) return;
+    
+    // Check cache first (cache for 3 minutes)
+    const now = Date.now();
+    if (!forceRefresh && trendsCache && (now - trendsCache.timestamp) < 180000) {
+      setTrendingPosts(trendsCache.data.posts);
+      setSubscriptions(trendsCache.data.subscriptions);
+      return;
+    }
     
     setIsLoadingTrends(true);
     setTrendsError(null);
@@ -32,68 +42,69 @@ const MainContent: React.FC = () => {
         return;
       }
       
-      const response = await fetch('http://localhost:8000/api/reddit/trending/subscribed?limit=25', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      // Fetch trending posts and subscriptions in parallel
+      const [trendsResponse, subsResponse] = await Promise.all([
+        fetch('http://localhost:8000/api/reddit/trending/subscribed?limit=25', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        fetch('http://localhost:8000/api/reddit/subscriptions', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        })
+      ]);
       
-      const result = await response.json();
+      const [trendsResult, subsResult] = await Promise.all([
+        trendsResponse.json(),
+        subsResponse.json()
+      ]);
       
-      if (result.success) {
-        setTrendingPosts(result.data.posts);
+      if (trendsResult.success && subsResult.success) {
+        const posts = trendsResult.data.posts;
+        const subs = subsResult.data.subreddits;
+        
+        setTrendingPosts(posts);
+        setSubscriptions(subs);
+        
+        // Cache the results
+        setTrendsCache({
+          data: { posts, subscriptions: subs },
+          timestamp: now
+        });
       } else {
-        setTrendsError(result.error || 'Failed to fetch trending posts');
+        setTrendsError(trendsResult.error || subsResult.error || 'Failed to fetch data');
       }
     } catch (error) {
-      console.error('Error fetching trending posts:', error);
+      console.error('Error fetching trending data:', error);
       setTrendsError('Failed to connect to server');
     } finally {
       setIsLoadingTrends(false);
+      setIsInitialLoad(false);
     }
-  }, [redditUser.connected]);
+  }, [redditUser.connected, trendsCache]);
 
-  // Fetch user's subscribed subreddits
-  const fetchSubscriptions = useCallback(async () => {
-    if (!redditUser.connected) return;
-    
-    try {
-      // Get JWT token from cookie (same as useRedditUser hook)
-      const token = document.cookie
-        .split('; ')
-        .find(row => row.startsWith('reddit_auth_token='))
-        ?.split('=')[1];
-        
-      if (!token) {
-        console.log('No Reddit auth token found');
-        return;
-      }
-      
-      const response = await fetch('http://localhost:8000/api/reddit/subscriptions', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        setSubscriptions(result.data.subreddits);
-      }
-    } catch (error) {
-      console.error('Error fetching subscriptions:', error);
-    }
-  }, [redditUser.connected]);
+  // Manual refresh function for the refresh button
+  const refreshTrendingData = useCallback(() => {
+    fetchTrendingData(true);
+  }, [fetchTrendingData]);
 
-  // Load data when component mounts or when Reddit connection changes
+  // Load data when switching to trends tab or when Reddit connection changes
   useEffect(() => {
     if (redditUser.connected && activeTab === 'trends') {
-      fetchTrendingPosts();
-      fetchSubscriptions();
+      fetchTrendingData();
     }
-  }, [redditUser.connected, activeTab, fetchTrendingPosts, fetchSubscriptions]);
+  }, [redditUser.connected, activeTab, fetchTrendingData]);
+  
+  // Preload trending data when user connects to Reddit (background loading)
+  useEffect(() => {
+    if (redditUser.connected && isInitialLoad) {
+      fetchTrendingData();
+    }
+  }, [redditUser.connected, isInitialLoad, fetchTrendingData]);
 
   // Helper function to format time ago
   const formatTimeAgo = (timestamp: number): string => {
@@ -232,7 +243,7 @@ const MainContent: React.FC = () => {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-reddit-dark">Trending in Your Subreddits</h2>
               <button 
-                onClick={fetchTrendingPosts}
+                onClick={refreshTrendingData}
                 disabled={isLoadingTrends}
                 className="bg-reddit-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-reddit-primary/90 disabled:opacity-50 transition-colors"
               >
