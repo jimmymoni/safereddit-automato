@@ -93,8 +93,32 @@ export const SavedOpportunities: React.FC<SavedOpportunitiesProps> = ({ classNam
   };
 
   const handleViewStrategy = (opportunity: SavedOpportunity) => {
-    console.log('Viewing strategy for:', opportunity.title);
-    // This could open a modal or navigate to a strategy view
+    // Create a basic strategy view for now - later we can make this a proper modal
+    const strategy = `
+📋 AI ENGAGEMENT STRATEGY for "${opportunity.title}"
+
+🎯 OPPORTUNITY TYPE: ${opportunity.opportunity.type.replace('_', ' ').toUpperCase()}
+
+💡 REASONING:
+${opportunity.opportunity.reasoning}
+
+🚀 SUGGESTED ACTION:
+${opportunity.suggestedAction.content}
+
+⏰ TIMING: ${opportunity.suggestedAction.timing}
+📊 CONFIDENCE: ${opportunity.suggestedAction.confidence}%
+🎢 RISK LEVEL: ${opportunity.opportunity.riskLevel.toUpperCase()}
+
+💰 POTENTIAL VALUE: ${opportunity.opportunity.potentialValue}/100
+
+🎯 STRATEGY FIT:
+${opportunity.opportunity.strategyFit}
+
+📍 SUBREDDIT: ${opportunity.subreddit}
+👤 ORIGINAL AUTHOR: u/${opportunity.author}
+`;
+    
+    alert(strategy);
   };
 
   const handleOpenThread = (opportunity: SavedOpportunity) => {

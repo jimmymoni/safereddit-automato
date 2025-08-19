@@ -132,6 +132,7 @@ const RedditCoPilot: React.FC = () => {
   const [showOpportunityMining, setShowOpportunityMining] = useState(false);
   const [miningStep, setMiningStep] = useState(1);
   const [selectedMarket, setSelectedMarket] = useState('');
+  const [customMarket, setCustomMarket] = useState('');
   const [selectedNiche, setSelectedNiche] = useState('');
   const [redditThreads, setRedditThreads] = useState<string[]>([]);
   const [painPoints, setPainPoints] = useState<any[]>([]);
@@ -167,10 +168,13 @@ const RedditCoPilot: React.FC = () => {
       localStorage.setItem('userProjects', JSON.stringify(existingProjects));
       
       // Show success feedback
-      alert(`Project "${idea.name}" created successfully! You can view it in your projects dashboard.`);
-      
-      // Optional: Navigate to projects page or close modal
-      setShowOpportunityMining(false);
+      if (window.confirm(`Project "${idea.name}" created successfully!\n\nWould you like to view your Projects Dashboard now?`)) {
+        // Navigate to projects page
+        window.location.href = '/projects';
+      } else {
+        // Close modal
+        setShowOpportunityMining(false);
+      }
       
     } catch (error) {
       console.error('Error creating project:', error);
@@ -1180,7 +1184,9 @@ const RedditCoPilot: React.FC = () => {
       ...prev,
       [threadId]: prev[threadId] === 'up' ? null : 'up'
     }));
-    console.log(`Upvoted thread ${threadId}`);
+    // Provide user feedback about the action
+    const thread = allThreads.find(t => t.id === threadId);
+    alert(`✅ Upvoted "${thread?.title || 'thread'}"!\n\n(In production, this would call the Reddit API to actually upvote the post)`);
   };
 
   const handleDownvote = (threadId: string) => {
@@ -1188,7 +1194,9 @@ const RedditCoPilot: React.FC = () => {
       ...prev,
       [threadId]: prev[threadId] === 'down' ? null : 'down'
     }));
-    console.log(`Downvoted thread ${threadId}`);
+    // Provide user feedback about the action
+    const thread = allThreads.find(t => t.id === threadId);
+    alert(`⬇️ Downvoted "${thread?.title || 'thread'}"!\n\n(In production, this would call the Reddit API to actually downvote the post)`);
   };
 
   const generateAiSuggestions = (thread: RedditThread) => {
@@ -1205,8 +1213,8 @@ const RedditCoPilot: React.FC = () => {
 
   const handleComment = (threadId: string) => {
     if (commentText.trim()) {
-      console.log(`Commenting on thread ${threadId}:`, commentText);
-      // Here you would call Reddit API to post comment
+      const thread = allThreads.find(t => t.id === threadId);
+      alert(`💬 Comment Posted!\n\nYour comment on "${thread?.title}":\n\n"${commentText}"\n\n(In production, this would call the Reddit API to actually post your comment)`);
       setCommentText('');
       setSelectedThread(null);
       setShowAiHelper(false);
@@ -1235,13 +1243,13 @@ const RedditCoPilot: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-4">
-              {/* Saved Opportunities Link */}
+              {/* Projects Link */}
               <Link
-                to="/saved"
+                to="/projects"
                 className="flex items-center space-x-2 px-4 py-2 text-[#FF4500] hover:text-[#E03E00] hover:bg-orange-50 rounded-lg transition-colors font-medium"
               >
-                <span className="text-sm">🌟</span>
-                <span className="text-sm">Saved</span>
+                <span className="text-sm">🚀</span>
+                <span className="text-sm">Projects</span>
               </Link>
             
               {/* Profile Dropdown Widget */}
@@ -1527,36 +1535,80 @@ const RedditCoPilot: React.FC = () => {
                   <span>Step 1: Select Your Market</span>
                 </h4>
                 <p className="text-gray-600 text-sm mb-4 animate-fadeIn delay-100">
-                  Choose from the three core markets where people spend money: Health, Wealth, or Relationships.
+                  Choose your primary market focus. This will help us find relevant discussions and pain points.
                 </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {['Health', 'Wealth', 'Relationships'].map((market, idx) => (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {[
+                    { name: 'Technology & Software', icon: '💻', desc: 'SaaS, apps, dev tools' },
+                    { name: 'Health & Fitness', icon: '🏃‍♂️', desc: 'Wellness, medical, nutrition' },
+                    { name: 'Finance & Business', icon: '💼', desc: 'FinTech, investing, B2B' },
+                    { name: 'Education & Learning', icon: '📚', desc: 'EdTech, courses, training' },
+                    { name: 'E-commerce & Retail', icon: '🛒', desc: 'Online stores, marketplace' },
+                    { name: 'Entertainment & Media', icon: '🎬', desc: 'Streaming, gaming, content' },
+                    { name: 'Food & Beverage', icon: '🍽️', desc: 'Restaurants, delivery, recipes' },
+                    { name: 'Travel & Hospitality', icon: '✈️', desc: 'Booking, experiences, tourism' },
+                    { name: 'Real Estate & Housing', icon: '🏠', desc: 'PropTech, rentals, construction' },
+                    { name: 'Automotive & Transport', icon: '🚗', desc: 'Cars, logistics, mobility' },
+                    { name: 'Fashion & Beauty', icon: '👗', desc: 'Clothing, cosmetics, style' },
+                    { name: 'Relationships & Dating', icon: '❤️', desc: 'Dating apps, social, community' },
+                    { name: 'Custom/Other', icon: '✏️', desc: 'Type your own category' }
+                  ].map((market, idx) => (
                     <button
-                      key={market}
-                      onClick={() => setSelectedMarket(market)}
-                      className={`p-4 rounded-lg border-2 transition-all duration-300 transform hover:scale-105 animate-slideInFromBottom ${
-                        selectedMarket === market
+                      key={market.name}
+                      onClick={() => setSelectedMarket(market.name)}
+                      className={`p-3 rounded-lg border-2 transition-all duration-300 transform hover:scale-105 animate-slideInFromBottom text-left ${
+                        selectedMarket === market.name
                           ? 'border-[#FF4500] bg-orange-50 text-[#FF4500] shadow-lg'
                           : 'border-gray-200 bg-white text-gray-700 hover:border-[#FF4500] hover:shadow-md'
                       }`}
-                      style={{ animationDelay: `${idx * 100}ms` }}
+                      style={{ animationDelay: `${idx * 50}ms` }}
                     >
-                      <h5 className="font-medium mb-2 transform transition-all duration-200">{market}</h5>
+                      <div className="flex items-center space-x-2 mb-1">
+                        <span className="text-lg">{market.icon}</span>
+                        <h5 className="font-medium text-sm transform transition-all duration-200">{market.name}</h5>
+                      </div>
                       <p className="text-xs opacity-75 transition-opacity duration-200">
-                        {market === 'Health' && 'Fitness, nutrition, mental wellness, medical'}
-                        {market === 'Wealth' && 'Business, finance, investing, career'}
-                        {market === 'Relationships' && 'Dating, family, parenting, social'}
+                        {market.desc}
                       </p>
                     </button>
                   ))}
                 </div>
-                {selectedMarket && (
+                
+                {/* Custom Market Input */}
+                {selectedMarket === 'Custom/Other' && (
+                  <div className="mt-4">
+                    <input
+                      type="text"
+                      value={customMarket}
+                      onChange={(e) => setCustomMarket(e.target.value)}
+                      placeholder="Enter your custom market category (e.g., Gaming, Cryptocurrency, Pet Care, etc.)"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF4500] focus:border-transparent transition-all duration-200 transform hover:scale-[1.01] animate-slideInFromBottom"
+                    />
+                  </div>
+                )}
+                
+                {((selectedMarket && selectedMarket !== 'Custom/Other') || (selectedMarket === 'Custom/Other' && customMarket.trim())) && (
                   <div className="mt-4">
                     <input
                       type="text"
                       value={selectedNiche}
                       onChange={(e) => setSelectedNiche(e.target.value)}
-                      placeholder={`Enter a specific niche within ${selectedMarket.toLowerCase()} (e.g., stress management, co-parenting, meal planning)`}
+                      placeholder={`Enter a specific niche within ${selectedMarket === 'Custom/Other' ? customMarket.toLowerCase() || 'your market' : selectedMarket.toLowerCase()} (e.g., ${
+                        selectedMarket === 'Custom/Other' ? 'specific problems or solutions in your market' :
+                        selectedMarket.includes('Technology') ? 'AI tools, web development, mobile apps' :
+                        selectedMarket.includes('Health') ? 'fitness tracking, mental health, nutrition' :
+                        selectedMarket.includes('Finance') ? 'personal budgeting, crypto trading, business analytics' :
+                        selectedMarket.includes('Education') ? 'online courses, language learning, coding bootcamps' :
+                        selectedMarket.includes('E-commerce') ? 'dropshipping, subscription boxes, marketplace' :
+                        selectedMarket.includes('Entertainment') ? 'streaming services, gaming platforms, content creation' :
+                        selectedMarket.includes('Food') ? 'meal planning, food delivery, restaurant tech' :
+                        selectedMarket.includes('Travel') ? 'booking platforms, travel planning, hospitality tech' :
+                        selectedMarket.includes('Real Estate') ? 'property management, home buying, construction tech' :
+                        selectedMarket.includes('Automotive') ? 'car sharing, logistics, vehicle tech' :
+                        selectedMarket.includes('Fashion') ? 'sustainable fashion, beauty tech, personal styling' :
+                        selectedMarket.includes('Relationships') ? 'dating apps, relationship coaching, social networking' :
+                        'specific problems or solutions in this space'
+                      })`}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FF4500] focus:border-transparent transition-all duration-200 transform hover:scale-[1.01] animate-slideInFromBottom"
                     />
                     <button

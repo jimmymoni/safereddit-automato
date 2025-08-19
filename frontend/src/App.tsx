@@ -18,6 +18,7 @@ import AutomationDashboard from './components/AutomationDashboard';
 import RedditCoPilot from './components/RedditCoPilot';
 import OnboardingFlow from './components/OnboardingFlow';
 import { SavedOpportunities } from './components/SavedOpportunities';
+import { ProjectsDashboard } from './components/ProjectsDashboard';
 import ErrorBoundary from './components/ErrorBoundary';
 
 function App() {
@@ -62,6 +63,9 @@ function App() {
               
               {/* Saved Opportunities */}
               <Route path="/saved" element={<SavedOpportunities />} />
+              
+              {/* Projects Dashboard */}
+              <Route path="/projects" element={<ProjectsDashboard />} />
               
               {/* Auth Flow */}
               <Route path="/" element={<LandingPage />} />
